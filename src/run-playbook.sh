@@ -125,9 +125,25 @@ reset_remote_url() {
   deploy_to="$(sed -n 's/^[[:space:]]*ansistrano_deploy_to:[[:space:]]*//p' "${playbook}" | head -1 | tr -d '"'"'")"
   [[ -n "${host}" && -n "${deploy_to}" ]] || { echo "::warning::Remote-URL konnte nicht zurueckgesetzt werden (Host oder Pfad unbekannt)."; return 0; }
   echo "::group::Remote-URL zuruecksetzen"
-  ansible "${host}" -m shell -a \
-    "cd '${deploy_to}/repo' 2>/dev/null && git remote set-url origin '${original_repo}' || true" \
-    < /dev/null || echo "::warning::Zuruecksetzen der Remote-URL fehlgeschlagen - im .git/config des Servers steht ein abgelaufener Token."
+  # deploy_to bewusst UNGEQUOTET im Remote-Kommando: Es ist typischerweise
+  # "~/public_html", und in einfachen Anfuehrungszeichen expandiert die
+  # Remote-Shell die Tilde nicht. Genau daran ist der erste Entwurf still
+  # gescheitert - mit "2>/dev/null ... || true" sah das Ergebnis aus wie
+  # Erfolg ("CHANGED | rc=0"), waehrend der Token liegenblieb. Darum hier
+  # kein Fehler-Schlucken und eine Gegenprobe.
+  local url
+  if url="$(ansible "${host}" -m shell -a \
+        "git -C ${deploy_to}/repo remote set-url origin '${original_repo}' && git -C ${deploy_to}/repo remote get-url origin" \
+        < /dev/null 2>&1)"; then
+    if printf '%s' "${url}" | grep -q 'x-access-token'; then
+      echo "::error::Die Remote-URL auf dem Server enthaelt weiterhin einen Token."
+    else
+      echo "Remote-URL zurueckgesetzt auf ${original_repo}"
+    fi
+  else
+    printf '%s\n' "${url}"
+    echo "::error::Zuruecksetzen der Remote-URL fehlgeschlagen - im .git/config des Servers bleibt ein abgelaufener Token stehen."
+  fi
   echo "::endgroup::"
 }
 trap 'reset_remote_url; cleanup' EXIT
