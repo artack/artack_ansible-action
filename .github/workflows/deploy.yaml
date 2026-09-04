@@ -29,6 +29,11 @@ on:
         required: false
         type: string
         default: "deployment/requirements.yml"
+      galaxy-requirements-inline:
+        description: Requirements-YAML als Text, mit festen Versionen. Hat Vorrang vor galaxy-requirements.
+        required: false
+        type: string
+        default: ""
       ansible-version:
         required: false
         type: string
@@ -115,6 +120,7 @@ jobs:
           git-ref: ${{ inputs.git-ref }}
           working-directory: ${{ inputs.working-directory }}
           galaxy-requirements: ${{ inputs.galaxy-requirements }}
+          galaxy-requirements-inline: ${{ inputs.galaxy-requirements-inline }}
           ansible-version: ${{ inputs.ansible-version }}
           extra-vars: ${{ inputs.extra-vars }}
           check-target: ${{ inputs.check-target }}

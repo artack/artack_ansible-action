@@ -75,9 +75,24 @@ if [[ "${clone_with_token}" == "1" ]]; then
 fi
 [[ -n "${extra_vars}" ]] && args+=(-e "${extra_vars}")
 
-if [[ -n "${galaxy_requirements}" ]]; then
+# ARTACK_GALAXY_REQUIREMENTS_INLINE hat Vorrang vor der Datei im Projekt.
+# Grund: deployment/requirements.yml pinnt keine Versionen. Entwicklermaschinen
+# haben deshalb, was dort vor Jahren installiert wurde, die CI holt jeweils die
+# neueste - und die Rollen sind untereinander nicht kompatibel. Gemessen am
+# 2026-09-04: ansistrano.deploy 4.0.1 registriert ansistrano_release_path aus
+# einem `command` (hat .stdout), 4.4.0 setzt es per `set_fact` als String;
+# cbrunnkvist v1.4.1 greift auf `.stdout` zu und bricht mit 4.4.0 ab.
+if [[ -n "${ARTACK_GALAXY_REQUIREMENTS_INLINE:-}" ]]; then
+  inline_requirements="${runtime_dir}/requirements.yml"
+  printf '%s\n' "${ARTACK_GALAXY_REQUIREMENTS_INLINE}" > "${inline_requirements}"
+  echo "::group::ansible-galaxy install (gepinnte Versionen)"
+  cat "${inline_requirements}"
+  ansible-galaxy install -r "${inline_requirements}"
+  echo "::endgroup::"
+elif [[ -n "${galaxy_requirements}" ]]; then
   [[ -f "${galaxy_requirements}" ]] || fail "Galaxy-Requirements '${galaxy_requirements}' nicht gefunden. Bei Projekten ohne Submodul galaxy-requirements leeren und die Rollen anders bereitstellen."
   echo "::group::ansible-galaxy install"
+  echo "::warning::deployment/requirements.yml pinnt keine Versionen - die CI holt die jeweils neuesten Rollen. Besser galaxy-requirements-inline mit festen Versionen setzen."
   ansible-galaxy install -r "${galaxy_requirements}"
   echo "::endgroup::"
 fi

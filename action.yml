@@ -22,6 +22,10 @@ inputs:
     description: Requirements-Datei fuer die Ansistrano-Rollen. Leer = Schritt ueberspringen (fuer Projekte ohne deployment/-Submodul).
     required: false
     default: "deployment/requirements.yml"
+  galaxy-requirements-inline:
+    description: Requirements-YAML als Text, mit festen Versionen. Hat Vorrang vor galaxy-requirements. Notwendig, weil deployment/requirements.yml keine Versionen pinnt und die Rollen untereinander nicht kompatibel sind.
+    required: false
+    default: ""
   ansible-version:
     description: pip-Spezifikation von ansible-core. Leer = bereits installiertes ansible-core verwenden.
     required: false
@@ -144,6 +148,7 @@ runs:
         ARTACK_SSH_PRIVATE_KEY: ${{ inputs.ssh-private-key }}
         ARTACK_SSH_KNOWN_HOSTS: ${{ inputs.ssh-known-hosts }}
         ARTACK_GITHUB_TOKEN: ${{ inputs.github-token }}
+        ARTACK_GALAXY_REQUIREMENTS_INLINE: ${{ inputs.galaxy-requirements-inline }}
       run: |
         "${GITHUB_ACTION_PATH}/src/run-playbook.sh" \
           "${{ inputs.playbook }}" \
