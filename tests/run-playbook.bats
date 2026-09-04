@@ -64,21 +64,26 @@ teardown() {
 @test "setzt git_branch explizit, damit das vars_prompt nicht auf seinen Default faellt" {
   run "${SCRIPT}" deploy_prod.yaml release/1.2.3 "" ""
   [ "${status}" -eq 0 ]
-  grep -q -- "-e git_branch=release/1.2.3" "${WORK}/calls.log"
+  tail -1 "${WORK}/calls.log" | grep -q -- "-e git_branch=release/1.2.3"
 }
 
 @test "prueft die Syntax, bevor der Server angefasst wird" {
   run "${SCRIPT}" deploy_prod.yaml master "" ""
   [ "${status}" -eq 0 ]
-  # Der erste Playbook-Aufruf muss der Syntaxpruefung gehoeren.
-  grep "ansible-playbook" "${WORK}/calls.log" | head -1 | grep -q -- "--syntax-check"
+  # Der letzte Aufruf ist der echte Lauf, der unmittelbar davor die
+  # Syntaxpruefung. (Der erste Aufruf gehoert der Ziel-Pruefung mit
+  # --list-hosts, siehe eigener Test.)
+  tail -2 "${WORK}/calls.log" | head -1 | grep -q -- "--syntax-check"
+  tail -1 "${WORK}/calls.log" | grep -qv -- "--syntax-check"
 }
 
 @test "setzt kein git_branch beim Rollback" {
   printf '    ansistrano_deploy_to: "~/public_html"\n' > rollback_prod.yaml
   run "${SCRIPT}" rollback_prod.yaml "" "" ""
   [ "${status}" -eq 0 ]
-  ! grep -q -- "git_branch" "${WORK}/calls.log"
+  # Nur der echte Lauf zaehlt - die Ziel-Pruefung setzt git_branch selbst,
+  # damit das vars_prompt sie nicht blockiert.
+  ! tail -1 "${WORK}/calls.log" | grep -q -- "git_branch"
 }
 
 @test "ueberspringt Galaxy, wenn keine Requirements angegeben sind" {
