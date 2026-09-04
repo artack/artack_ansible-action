@@ -91,6 +91,8 @@ in `needs` nachgetragen werden, sonst deployt der Job daran vorbei.
 | `galaxy-requirements-inline` | nein | eingebaute Pins | Requirements-YAML als Text, Override |
 | `galaxy-requirements` | nein | `""` | Pfad zu einer Requirements-Datei; nur setzen, wenn sie Versionen pinnt |
 | `extra-vars` | nein | `""` | weitere Ansible-Variablen als `key=value` |
+| `clone-with-github-token` | nein | `true` | Zielserver klont mit dem Lauf-Token; `false` fuer Repos ausserhalb github.com |
+| `github-token` | nein | `""` | leer lassen - die Action nimmt `github.token` |
 
 `runs-on`, `timeout-minutes`, `environment` und `concurrency` setzt der Job des
 Projekts selbst - siehe Block oben.
@@ -107,12 +109,6 @@ Schluessel in zwei Environments hebt das Scoping auf.
 
 ## Einrichtung pro Umgebung
 
-Der Zielserver klont selbst (`ansistrano_deploy_via: git`,
-`ssh://git@github.com/...`). Der Baustein leitet den Deploy-Schluessel per
-`ForwardAgent=yes` weiter, so wie es eine `~/.ssh/config` mit `ForwardAgent`
-beim Deploy von Hand tut. **Darum muss die oeffentliche Haelfte des Schluessels
-am Repository als read-only Deploy Key haengen** - sonst kann der Server nicht
-klonen.
 
 ```bash
 REPO=artack/<projekt>
@@ -123,10 +119,9 @@ USER=<ansible_user aus hosts.yaml>
 # 1. Schluessel erzeugen (ohne Passphrase - ein Automat kann keine eingeben)
 ssh-keygen -t ed25519 -C "github-actions ${REPO##*/} $ENV" -f ./ci_$ENV -N ""
 
-# 2. Oeffentlicher Teil: auf den Server UND als read-only Deploy Key ans Repo
+# 2. Oeffentlicher Teil in authorized_keys des Deploy-Nutzers
 ssh-copy-id -i ./ci_$ENV.pub $USER@$HOST
 ssh -i ./ci_$ENV $USER@$HOST true   # muss ohne Rueckfrage durchlaufen
-gh repo deploy-key add ./ci_$ENV.pub --repo $REPO --title "github-actions $ENV"
 
 # 3. Host-Key holen und sichten
 ssh-keyscan "$HOST" | grep -v '^#' > known_hosts.txt
@@ -149,6 +144,36 @@ per Tag; auf einen Tag umstellen, sobald das Projekt gruen deployt.
 
 Setzt ein Projekt in `hosts.yaml` eigene `ansible_ssh_common_args`, gewinnt das
 Inventar - dann muss `ForwardAgent=yes` dort mit hinein.
+
+## Wie der Zielserver an das Repository kommt
+
+`ansistrano_deploy_via: git` heisst: **der Zielserver** klont, nicht der Runner.
+Er hat dort keine eigene Zugangsberechtigung - von Hand klappt es nur, weil der
+SSH-Agent des Menschen weitergeleitet wird.
+
+Der Baustein nimmt dafuer das `GITHUB_TOKEN` des Laufs, laut GitHub-Doku
+*"scoped to the invoking repository and expires after job completion"*. Er setzt
+fuer den Lauf per `-e`
+
+```
+ansistrano_git_repo=https://x-access-token:<token>@github.com/<owner>/<repo>.git
+```
+
+und setzt die Remote-URL danach auf den Wert aus dem Playbook zurueck - per
+`community.general.git_config`, auch wenn das Playbook gescheitert ist, mit
+Gegenprobe am zurueckgelesenen Wert. Das Playbook bleibt auf `ssh://`, manuelle
+Deployments sind unberuehrt. `permissions: contents: read` genuegt, und der
+Aufrufer muss den Token nicht durchreichen.
+
+**Ehrlich dazu:** Waehrend des Laufs steht der Token in
+`<deploy_to>/repo/.git/config` auf dem Zielserver - ein Verzeichnis, das das
+Release ueberlebt. Er verfaellt mit dem Job und wird danach ueberschrieben, aber
+er steht kurzzeitig dort. Das ist der bewusst eingegangene Handel gegenueber
+einem dauerhaften Deploy Key: kurzlebiges Geheimnis mit Fussabdruck statt
+dauerhaftes ohne.
+
+Liegt ein Repo nicht auf github.com, `clone-with-github-token: false` setzen -
+dann braucht der Server eine eigene Zugangsberechtigung.
 
 ## Galaxy-Rollen: eingebaute Pins
 

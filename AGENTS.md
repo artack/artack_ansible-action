@@ -44,9 +44,17 @@ Namenskonvention verlangt.
 - **`-e git_branch=<ref>` ist Pflicht** bei Playbooks mit `vars_prompt`: Bei
   geschlossenem stdin fragt Ansible nicht, sondern nimmt still
   `git_default_branch`.
-- **`ForwardAgent=yes`** ist kein Detail: Der Zielserver klont selbst von
-  GitHub und hat keine eigene Zugangsberechtigung. Voraussetzung ist ein
-  read-only Deploy Key am Repo.
+- **Kein `ForwardAgent`.** Der Zielserver klont selbst von GitHub, nimmt dafuer
+  aber das kurzlebige Lauf-Token - er braucht keine eigene GitHub-Identitaet.
+  Den Deploy-Key an einen Kundenserver weiterzuleiten waere Exposition ohne
+  Nutzen. Sams Entscheid: kurzlebiges Geheimnis mit kurzem Fussabdruck auf dem
+  Server statt dauerhafter Deploy Key.
+- **Das Aufraeumen der Remote-URL laeuft ueber
+  `community.general.git_config`, nie ueber `-m shell`.** Der Parameter `repo`
+  ist ein Ansible-Pfadtyp und loest die Tilde selbst auf. Der erste Entwurf war
+  ein `cd '~/pfad'` in einem Shell-String - die Tilde expandierte nicht, und
+  `2>/dev/null || true` liess den Fehlschlag als `CHANGED | rc=0` erscheinen.
+  Nicht zurueckbauen.
 - **`pipx` nicht wieder einfuehren** - siehe Kommentar in `action.yml`.
 
 ## Kommandos auf einem Kundenserver

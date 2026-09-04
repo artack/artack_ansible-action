@@ -13,7 +13,8 @@
 # Optional:
 #   ARTACK_GALAXY_REQUIREMENTS_INLINE  Requirements-YAML als Text (Override)
 #
-# Aufruf: run-playbook.sh <playbook> <git-ref|""> <galaxy-requirements|""> <extra-vars|"">
+# Aufruf: run-playbook.sh <playbook> <git-ref|""> <galaxy-requirements|""> \
+#                          <extra-vars|""> <clone-with-token 1|0>
 
 set -euo pipefail
 
@@ -21,6 +22,7 @@ playbook_arg="${1:?playbook fehlt}"
 git_ref="${2-}"
 galaxy_requirements="${3-}"
 extra_vars="${4-}"
+clone_with_token="${5-1}"
 
 fail() { printf '::error::%s\n' "$*" >&2; exit 1; }
 
@@ -100,17 +102,12 @@ printf '%s\n' "${ARTACK_SSH_PRIVATE_KEY}" | ssh-add - 2>/dev/null \
 
 # Host-Key wird geprueft, nicht umgangen.
 #
-# ForwardAgent=yes, weil der ZIELSERVER selbst von GitHub klont
-# (ansistrano_deploy_via: git, ssh://git@github.com/...). Von Hand klappt das,
-# weil in der ~/.ssh/config ForwardAgent gesetzt ist und der Server den
-# weitergeleiteten Schluessel benutzt. Hier genauso: derselbe Deploy-Key
-# bedient Server-Login und Klon. Kein Token, keine ueberschriebene
-# Playbook-Variable, nichts das auf dem Server liegenbleibt.
-#
-# Setzt ein Projekt in hosts.yaml eigene ansible_ssh_common_args, gewinnt das
-# Inventar - dann muss ForwardAgent dort mit hinein.
+# BEWUSST OHNE ForwardAgent: Der Schluessel dient nur dem Server-Login. Fuer den
+# Klon nimmt der Server das Lauf-Token (siehe unten), er braucht also keine
+# eigene GitHub-Identitaet - und den Deploy-Key an einen Kundenserver
+# weiterzureichen waere dann Exposition ohne Nutzen. Der Agent bleibt lokal.
 export ANSIBLE_HOST_KEY_CHECKING=True
-export ANSIBLE_SSH_COMMON_ARGS="-o UserKnownHostsFile=${known_hosts} -o StrictHostKeyChecking=yes -o ForwardAgent=yes"
+export ANSIBLE_SSH_COMMON_ARGS="-o UserKnownHostsFile=${known_hosts} -o StrictHostKeyChecking=yes"
 export ANSIBLE_FORCE_COLOR=1
 
 args=()
@@ -119,6 +116,28 @@ args=()
 # geschlossenem stdin fragt Ansible nicht, sondern nimmt den Default.
 [[ -n "${git_ref}" ]] && args+=(-e "git_branch=${git_ref}")
 [[ -n "${extra_vars}" ]] && args+=(-e "${extra_vars}")
+
+# Der ZIELSERVER klont selbst von GitHub (ansistrano_deploy_via: git, das
+# git-Modul der Rolle laeuft ohne delegate_to). Von Hand klappt das ueber den
+# weitergeleiteten Agenten des Menschen; in der CI gibt es den nicht. Statt
+# eines dauerhaften Deploy Keys nimmt der Lauf sein eigenes GITHUB_TOKEN: laut
+# Doku "scoped to the invoking repository and expires after job completion".
+#
+# Nur fuer diesen Lauf per -e. Das Playbook bleibt auf ssh:// - der manuelle Weg
+# ueber die Agent-Weiterleitung ist unberuehrt. Nach dem Lauf wird die
+# Remote-URL zurueckgesetzt (siehe reset_remote_url).
+#
+# Der Handel, den Sam bewusst eingegangen ist: kurzlebiges Geheimnis mit
+# kurzzeitigem Fussabdruck auf dem Server statt dauerhaftes Geheimnis ohne.
+original_repo=""
+if [[ "${clone_with_token}" == "1" ]]; then
+  [[ -n "${ARTACK_GITHUB_TOKEN:-}" ]] || fail "ARTACK_GITHUB_TOKEN ist leer - ohne Token kein HTTPS-Klon. Fuer ein Repo ausserhalb von github.com clone-with-github-token auf false setzen."
+  [[ -n "${GITHUB_REPOSITORY:-}" ]] || fail "GITHUB_REPOSITORY ist leer - laeuft das ausserhalb von GitHub Actions?"
+  original_repo="$(sed -n 's/^[[:space:]]*ansistrano_git_repo:[[:space:]]*//p' "${playbook}" | head -1 | tr -d '"'"'")"
+  [[ -n "${original_repo}" ]] || fail "'${playbook}' setzt kein ansistrano_git_repo - ohne den Ausgangswert liesse sich die Remote-URL danach nicht zuruecksetzen."
+  args+=(-e "ansistrano_git_repo=https://x-access-token:${ARTACK_GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git")
+  echo "Klon per HTTPS mit dem Lauf-Token (github.com/${GITHUB_REPOSITORY})."
+fi
 
 requirements="${runtime_dir}/requirements.yml"
 if [[ -n "${ARTACK_GALAXY_REQUIREMENTS_INLINE:-}" ]]; then
@@ -141,6 +160,63 @@ echo "::endgroup::"
 echo "::group::ansible-playbook --syntax-check"
 ansible-playbook "${playbook}" "${args[@]}" --syntax-check < /dev/null
 echo "::endgroup::"
+
+# Aufraeumen: Das git-Modul der Rolle schreibt die Remote-URL in
+# <deploy_to>/repo/.git/config auf dem Server, und dieses Verzeichnis ueberlebt
+# das Release. Der Token darin ist nach dem Job wertlos, soll aber nicht
+# liegenbleiben.
+#
+# Ueber community.general.git_config, NICHT per Shell: Dessen Parameter `repo`
+# ist ein Ansible-Pfadtyp und loest die Tilde selbst auf. Der erste Entwurf war
+# ein "-m shell" mit cd '~/pfad' - die Tilde in einfachen Anfuehrungszeichen
+# expandiert keine Shell, und "2>/dev/null || true" liess den Fehlschlag als
+# "CHANGED | rc=0" erscheinen, waehrend der Token liegenblieb. Das Modul macht
+# diese Klasse Fehler unmoeglich.
+#
+# Laeuft auch, wenn das Playbook gescheitert ist (trap), und der Erfolg wird am
+# ZUSTAND gemessen: Die URL wird zurueckgelesen und auf "x-access-token" geprueft.
+reset_remote_url() {
+  [[ -n "${original_repo}" ]] || return 0
+  local host deploy_to args_json url listed
+  # Die beiden Ermittlungen sind reine LESE-Vorgaenge, und ihr Fehlschlag wird
+  # unten ausdruecklich gemeldet - darum hier "|| true". Ohne das bricht
+  # `set -euo pipefail` schon an einem leeren grep ab, und der Lauf endet mit
+  # einem nackten exit 1 statt mit der Meldung, die sagt was fehlt. Das ist
+  # NICHT das Muster "Fehler schlucken": geschluckt wird nichts, der Zustand
+  # wird gleich danach geprueft.
+  listed="$(ansible-playbook "${playbook}" "${args[@]}" --list-hosts < /dev/null 2>/dev/null || true)"
+  host="$(printf '%s\n' "${listed}" | sed -n '/hosts ([0-9]*)/,$p' | tail -n +2 | tr -d ' ' | grep -v '^$' | head -1 || true)"
+  deploy_to="$(sed -n 's/^[[:space:]]*ansistrano_deploy_to:[[:space:]]*//p' "${playbook}" | head -1 | tr -d '"'"'" || true)"
+  if [[ -z "${host}" || -z "${deploy_to}" ]]; then
+    echo "::error::Remote-URL konnte nicht zurueckgesetzt werden - Host oder ansistrano_deploy_to nicht ermittelbar. Im .git/config des Servers bleibt ein abgelaufener Token stehen."
+    return 0
+  fi
+  # JSON-Argumente statt key=value: Die URL enthaelt ":" und "@". Ein
+  # Anfuehrungszeichen darin waere ein Fehler, nicht ein Sonderfall.
+  case "${original_repo}${deploy_to}" in
+    *'"'*|*'\'*) echo "::error::Unerwartetes Zeichen in Repo-URL oder Pfad - Remote-URL nicht zurueckgesetzt."; return 0 ;;
+  esac
+
+  echo "::group::Remote-URL zuruecksetzen"
+  args_json="$(printf '{"name":"remote.origin.url","scope":"local","repo":"%s/repo","value":"%s"}' \
+    "${deploy_to}" "${original_repo}")"
+  if ! ansible "${host}" -m community.general.git_config -a "${args_json}" < /dev/null; then
+    echo "::error::Zuruecksetzen der Remote-URL fehlgeschlagen - im .git/config des Servers bleibt ein abgelaufener Token stehen."
+    echo "::endgroup::"
+    return 0
+  fi
+  # Gegenprobe am Zustand, nicht am Rueckgabewert.
+  url="$(ansible "${host}" -m community.general.git_config \
+    -a "$(printf '{"name":"remote.origin.url","scope":"local","repo":"%s/repo"}' "${deploy_to}")" \
+    < /dev/null 2>&1)" || true
+  if printf '%s' "${url}" | grep -q 'x-access-token'; then
+    echo "::error::Die Remote-URL auf dem Server enthaelt weiterhin einen Token."
+  else
+    echo "Remote-URL zurueckgesetzt auf ${original_repo}"
+  fi
+  echo "::endgroup::"
+}
+trap 'reset_remote_url; cleanup' EXIT
 
 # stdin bewusst geschlossen: ein unerwarteter Prompt soll auffallen, nicht warten.
 ansible-playbook "${playbook}" "${args[@]}" < /dev/null
