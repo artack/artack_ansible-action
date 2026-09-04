@@ -19,7 +19,7 @@ on:
 
 jobs:
   rollback:
-    uses: artack/artack_ansible-action/.github/workflows/rollback.yaml@v0.1.0
+    uses: artack/artack_ansible-action/.github/workflows/rollback.yaml@v0.1.1
     with:
       # Eigenes Environment, damit Rollbacks eigene Freigeber haben koennen.
       environment: ${{ inputs.environment }}-rollback

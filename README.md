@@ -77,7 +77,7 @@ das naechste Deployment schiefgeht.
 Deshalb:
 
 - Default-Branch `main`, Freigaben als Tags (`v0.1.0`, `v0.2.0`, …).
-- Aufrufer zeigen auf einen Tag: `@v0.1.0`.
+- Aufrufer zeigen auf einen Tag: `@v0.1.1`.
 - Schnittstellenbruch (`inputs`, Secret-Namen, Verhalten) = neuer Major-Tag.
 - Wer das auf `@main` "vereinfacht", nimmt neun Projekten das Review vor einer
   Verhaltensaenderung an ihrem Produktions-Deployment. Bitte nicht.
@@ -198,7 +198,7 @@ in diesem Lauf nicht behebbarer Befund nicht bei jedem Push rot leuchtet.
 ```yaml
 jobs:
   deploy:
-    uses: artack/artack_ansible-action/.github/workflows/deploy.yaml@v0.1.0
+    uses: artack/artack_ansible-action/.github/workflows/deploy.yaml@v0.1.1
     with:
       environment: prod
       playbook: deploy_prod.yaml

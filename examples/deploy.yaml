@@ -16,7 +16,7 @@ on:
 
 jobs:
   deploy:
-    uses: artack/artack_ansible-action/.github/workflows/deploy.yaml@v0.1.0
+    uses: artack/artack_ansible-action/.github/workflows/deploy.yaml@v0.1.1
     with:
       environment: ${{ inputs.environment }}
       playbook: deploy_${{ inputs.environment }}.yaml

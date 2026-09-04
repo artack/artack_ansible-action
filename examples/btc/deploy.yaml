@@ -27,7 +27,7 @@ jobs:
   deploy:
     # Fester Versions-Tag, kein @main: ein Push auf main duerfte nicht still das
     # Deployment-Verhalten aendern. Begruendung im README.
-    uses: artack/artack_ansible-action/.github/workflows/deploy.yaml@v0.1.0
+    uses: artack/artack_ansible-action/.github/workflows/deploy.yaml@v0.1.1
     with:
       environment: ${{ inputs.environment }}
       # btc-Umgebungen heissen wie die Playbook-Suffixe: deploy_stag / deploy_prod.
