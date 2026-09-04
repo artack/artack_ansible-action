@@ -8,7 +8,7 @@ on:
 
 jobs:
   preflight:
-    uses: artack/artack_ansible-action/.github/workflows/preflight.yaml@v0.3.0
+    uses: artack/artack_ansible-action/.github/workflows/preflight.yaml@v0.3.1
     with:
       # btc/rollback_prod.yaml und rollback_stag.yaml sind untailorierte
       # dist-Vorlagen (hosts: all, ansistrano_deploy_to: /var/www/my-app). Der

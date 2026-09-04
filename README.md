@@ -29,7 +29,7 @@ on:
 
 jobs:
   deploy:
-    uses: artack/artack_ansible-action/.github/workflows/deploy.yaml@v0.3.0
+    uses: artack/artack_ansible-action/.github/workflows/deploy.yaml@v0.3.1
     with:
       environment: ${{ inputs.environment }}
       playbook: deploy_${{ inputs.environment }}.yaml
@@ -49,7 +49,7 @@ Automatisch bei gruenen Checks: Job in den Pruef-Workflow legen, per `needs` an
   deploy-stag:
     needs: [checker, linter]
     if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
-    uses: artack/artack_ansible-action/.github/workflows/deploy.yaml@v0.3.0
+    uses: artack/artack_ansible-action/.github/workflows/deploy.yaml@v0.3.1
     with:
       environment: stag
       playbook: deploy_stag.yaml
@@ -140,7 +140,7 @@ Deploy-Playbook - `--syntax-check` faengt das nicht.
 
 ## Versionierung
 
-Aufrufer pinnen einen Tag (`@v0.3.0`), nie einen Branch - ein Push auf `main`
+Aufrufer pinnen einen Tag (`@v0.3.1`), nie einen Branch - ein Push auf `main`
 wuerde sonst still das Deployment-Verhalten aller Aufrufer aendern.
 Schnittstellenbruch = neuer Major-Tag.
 

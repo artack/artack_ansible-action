@@ -62,8 +62,15 @@ jobs:
         env:
           ANSIBLE_VERSION: ${{ inputs.ansible-version }}
         run: |
-          pipx install "${ANSIBLE_VERSION}"
-          ansible --version
+          # Eigene venv, nicht pipx - /opt/pipx/venvs gehoert root, und ohne
+          # --force laesst pipx die vorinstallierte Version stehen. Siehe
+          # action.yml.
+          venv="${HOME}/.artack-ansible"
+          python3 -m venv "${venv}"
+          "${venv}/bin/pip" install --quiet --upgrade pip
+          "${venv}/bin/pip" install --quiet "${ANSIBLE_VERSION}"
+          "${venv}/bin/ansible" --version
+          echo "${venv}/bin" >> "${GITHUB_PATH}"
 
       - name: Install roles
         if: inputs.galaxy-requirements != ''

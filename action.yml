@@ -63,12 +63,23 @@ runs:
       env:
         ANSIBLE_VERSION: ${{ inputs.ansible-version }}
       run: |
-        # --force ist noetig: Auf ubuntu-latest ist ansible-core vorinstalliert,
-        # und ohne --force meldet pipx nur "already seems to be installed" und
-        # laesst die vorhandene Version stehen - der Pin waere still unwirksam.
-        # Im ersten Pilotlauf (2026-09-04) lief so 2.21.3 statt 2.16.14.
-        pipx install --force "${ANSIBLE_VERSION}"
-        ansible --version
+        # Eigene venv im Runner-Home statt pipx. Zwei Sackgassen davor, beide im
+        # Pilotlauf gemessen (2026-09-04):
+        #   pipx install <pin>          -> "already seems to be installed",
+        #                                  laesst die vorinstallierte Version
+        #                                  stehen; der Pin ist still unwirksam
+        #                                  (2.21.3 statt 2.16.14 gelaufen).
+        #   pipx install --force <pin>  -> "[Errno 1] Operation not permitted:
+        #                                  /opt/pipx/venvs/ansible-core/..." -
+        #                                  das Verzeichnis gehoert root.
+        # Eine venv unter $HOME umgeht beides und macht den Pin verbindlich.
+        venv="${HOME}/.artack-ansible"
+        python3 -m venv "${venv}"
+        "${venv}/bin/pip" install --quiet --upgrade pip
+        "${venv}/bin/pip" install --quiet "${ANSIBLE_VERSION}"
+        # GITHUB_PATH greift erst im naechsten Schritt, darum hier absolut.
+        "${venv}/bin/ansible" --version
+        echo "${venv}/bin" >> "${GITHUB_PATH}"
 
     # Assets VOR dem Playbook: Der Symlink-Wechsel im Playbook schaltet den
     # Code um, die Assets liegen in einem shared path. Begruendung der
