@@ -75,8 +75,9 @@ jobs:
       - name: Syntax check
         working-directory: ${{ inputs.working-directory }}
         run: |
-          shopt -s nullglob
           for playbook in deploy_*.yaml rollback_*.yaml; do
+            # Ohne nullglob: ein nicht aufgeloester Glob wird uebersprungen.
+            [ -e "${playbook}" ] || continue
             echo "::group::${playbook}"
             # git_branch wird gesetzt, damit das vars_prompt nicht greift.
             ansible-playbook "${playbook}" -e git_branch=preflight --syntax-check < /dev/null
@@ -88,11 +89,17 @@ jobs:
         env:
           CHECK_ROLLBACK: ${{ inputs.check-rollback }}
         run: |
-          shopt -s nullglob
           checker="${GITHUB_WORKSPACE}/.artack-deploy/src/check-playbook-target.sh"
-          playbooks=(deploy_*.yaml)
+          playbooks=()
+          for playbook in deploy_*.yaml; do
+            [ -e "${playbook}" ] || continue
+            playbooks+=("${playbook}")
+          done
           if [[ "${CHECK_ROLLBACK}" == "true" ]]; then
-            playbooks+=(rollback_*.yaml)
+            for playbook in rollback_*.yaml; do
+              [ -e "${playbook}" ] || continue
+              playbooks+=("${playbook}")
+            done
           else
             echo "::warning::Rollback-Playbooks nicht geprueft (check-rollback: false). Der Fix gehoert in die Einrichtungs-Checkliste dieses Projekts."
           fi

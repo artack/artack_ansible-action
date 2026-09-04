@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
 #
 # Die Ziel-Pruefung ist die Zusicherung, dass ein Playbook auf genau die
-# Umgebung zeigt, die es treffen soll. Die Faelle hier sind aus den echten
-# Projekten abgeleitet (Befunde vom 2026-09-04).
+# Umgebung zeigt, die es treffen soll. Jeder Fall hier entspricht einem Defekt,
+# der in echten Playbooks vorkommt.
 
 setup() {
   SCRIPT="${BATS_TEST_DIRNAME}/../src/check-playbook-target.sh"
@@ -38,7 +38,7 @@ playbook_with() { printf '    ansistrano_deploy_to: "%s"\n' "$2" > "$1"; }
   [[ "${output}" == *"OK"* ]]
 }
 
-@test "Abbruch beim dist-Platzhalter /var/www/my-app (Fall btc, website)" {
+@test "Abbruch beim dist-Platzhalter /var/www/my-app" {
   playbook_with deploy_prod.yaml '~/public_html'
   playbook_with rollback_prod.yaml '/var/www/my-app'
   run "${SCRIPT}" rollback_prod.yaml

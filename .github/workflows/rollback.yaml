@@ -45,11 +45,6 @@ on:
         required: false
         type: string
         default: ""
-    secrets:
-      ssh-private-key:
-        required: true
-      ssh-known-hosts:
-        required: true
 
 jobs:
   rollback:
@@ -102,5 +97,9 @@ jobs:
           # Hier ist die Ziel-Pruefung der eigentliche Schutz - nicht abschaltbar.
           check-target: true
           reference-playbook: ${{ inputs.reference-playbook }}
-          ssh-private-key: ${{ secrets.ssh-private-key }}
-          ssh-known-hosts: ${{ secrets.ssh-known-hosts }}
+          # Direkt aus dem Environment dieses Jobs. NICHT vom Aufrufer
+          # durchreichen: Ein Job, der einen Reusable Workflow aufruft, darf
+          # laut GitHub kein `environment` setzen und sieht deshalb nur Repo-
+          # und Org-Secrets - Environment-Secrets waeren dort leer.
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          ssh-known-hosts: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}

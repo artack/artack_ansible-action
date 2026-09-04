@@ -50,13 +50,6 @@ on:
         required: false
         type: boolean
         default: true
-    secrets:
-      ssh-private-key:
-        description: Privater Deploy-Schluessel des CI-Nutzers auf dem Zielserver.
-        required: true
-      ssh-known-hosts:
-        description: known_hosts-Eintrag des Zielservers (ssh-keyscan).
-        required: true
 
 jobs:
   deploy:
@@ -102,8 +95,12 @@ jobs:
           ansible-version: ${{ inputs.ansible-version }}
           extra-vars: ${{ inputs.extra-vars }}
           check-target: ${{ inputs.check-target }}
-          ssh-private-key: ${{ secrets.ssh-private-key }}
-          ssh-known-hosts: ${{ secrets.ssh-known-hosts }}
+          # Direkt aus dem Environment dieses Jobs. NICHT vom Aufrufer
+          # durchreichen: Ein Job, der einen Reusable Workflow aufruft, darf
+          # laut GitHub kein `environment` setzen und sieht deshalb nur Repo-
+          # und Org-Secrets - Environment-Secrets waeren dort leer.
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          ssh-known-hosts: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
 
       - name: Summary
         if: always()

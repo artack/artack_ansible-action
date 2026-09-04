@@ -1,6 +1,12 @@
 # btc - Pilot
 
-Zwei Dateien fuer das btc-Repo (`artack/suissetec_building-technology-calculator`),
+> **Diese Datei ist die Beschreibung, nicht die Einrichtung.** Sie richtet
+> nichts ein und ersetzt keinen Schritt. Wirksam wird nur, was im **btc-Repo**
+> unter `.github/workflows/` liegt; die Vorlagen daneben sind Kopierquellen.
+> Ob der Pilot startbereit ist, entscheidet sich dort und an den Secrets im
+> Environment `stag` - siehe [Was noch fehlt](#was-noch-fehlt).
+
+Zwei Vorlagen fuer das btc-Repo (`artack/suissetec_building-technology-calculator`),
 beide als **eigene** Workflow-Dateien - `linter.yaml` bleibt unberuehrt.
 
 | Datei | Ziel im btc-Repo | Braucht Secrets? |

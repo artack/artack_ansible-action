@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
 # Prueft, dass ein Playbook auf das Ziel zeigt, das es treffen soll - und bricht
-# sonst ab. Faengt die Falle, die am 2026-09-04 in btc und suissetec_website
-# gefunden wurde: untailorierte dist-Vorlagen mit "hosts: all" (trifft prod UND
-# stag gleichzeitig) und "ansistrano_deploy_to: /var/www/my-app".
+# sonst ab. Faengt untailorierte dist-Vorlagen: "hosts: all" trifft prod UND
+# stag gleichzeitig, und "ansistrano_deploy_to: /var/www/my-app" zeigt an einen
+# Pfad, den es auf dem Zielserver nicht gibt.
 #
 # --syntax-check faengt das NICHT - er prueft Form, nicht Ziel.
 #

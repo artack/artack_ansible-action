@@ -1,15 +1,31 @@
-# Aufrufer fuer btc (suissetec_building-technology-calculator).
-# Ziel: .github/workflows/deploy.yaml im btc-Repo - als EIGENE Datei, nicht in
-# linter.yaml hineingemischt: Pruefung und Deployment sind getrennte Anlaesse
-# mit getrennten Rechten.
+# Deployment fuer btc (suissetec_building-technology-calculator).
+#
+# Eigene Datei mit Absicht: linter.yaml bleibt unberuehrt. Pruefung und
+# Deployment sind getrennte Anlaesse mit getrennten Rechten.
+#
+# SECRETS: Die beiden Secrets haengen am GitHub **Environment**, nicht am
+# Repository - `stag` traegt den stag-Schluessel, `prod` spaeter einen eigenen.
+# Fehlt eines, bricht der Lauf mit einer sprechenden Meldung ab
+# ("ARTACK_SSH_PRIVATE_KEY ist leer - Secret nicht gesetzt oder nicht an die
+# Umgebung durchgereicht.") statt irgendwo im ssh zu haengen: Der Baustein
+# prueft beide Werte, bevor er einen ssh-agent startet oder Ansible aufruft.
+# Der Abbruch kommt nach Checkout und ansible-Installation, also nach etwa einer
+# halben Minute - aber als Fehlermeldung, nicht als Timeout.
 #
 # Erhoben am 2026-09-04 aus hosts.yaml und den Playbooks:
-#   prod  hosts btc-prod  user www-btc-prod  ~/public_html  Default-Branch master
 #   stag  hosts btc-stag  user www-btc-stag  ~/public_html  Default-Branch develop
+#   prod  hosts btc-prod  user www-btc-prod  ~/public_html  Default-Branch master
+# Beide Umgebungen liegen auf derselben Maschine (suissetec01.nine.ch), aber
+# unter verschiedenen Unix-Benutzern - die Trennung ruht auf der
+# Benutzertrennung, deshalb pro Umgebung ein eigener Schluessel.
 #
-# Es fehlen nur noch die beiden Environment-Secrets (siehe README).
+# Kein Rollback-Aufrufer: btc/rollback_*.yaml sind untailorierte dist-Vorlagen
+# (hosts: all trifft beide Umgebungen, ansistrano_deploy_to: /var/www/my-app).
+# Erst nach Fix und Review.
 name: deploy
 
+# Nur workflow_dispatch, kein push-Trigger: Die Datei ist inert, bis sie jemand
+# bewusst ausloest.
 on:
   workflow_dispatch:
     inputs:
@@ -17,22 +33,35 @@ on:
         description: Zielumgebung
         required: true
         type: choice
-        options: [stag, prod]
+        options:
+          # stag ist der Pilot.
+          - stag
+          # prod ERST nach dem erfolgreichen stag-Piloten - und erst, wenn das
+          # Environment `prod` seinen EIGENEN Schluessel hat (nicht den
+          # stag-Schluessel kopieren, sonst ist das Environment-Scoping
+          # wirkungslos) sowie Required reviewers und eine Deployment branch
+          # policy traegt.
+          - prod
       git-ref:
-        description: Branch, Tag oder SHA. Ein Tag ist vorzuziehen - er bewegt sich nicht zwischen Freigabe und Ausfuehrung.
+        description: Branch, Tag oder SHA (Tag bevorzugt)
         required: true
         type: string
 
 jobs:
   deploy:
-    # Fester Versions-Tag, kein @main: ein Push auf main duerfte nicht still das
-    # Deployment-Verhalten aendern. Begruendung im README.
-    uses: artack/artack_ansible-action/.github/workflows/deploy.yaml@v0.1.1
+    # Fester Versions-Tag, kein @main: Ein Push auf main duerfte nicht still das
+    # Deployment-Verhalten dieses Projekts aendern.
+    uses: artack/artack_ansible-action/.github/workflows/deploy.yaml@v0.2.0
     with:
       environment: ${{ inputs.environment }}
-      # btc-Umgebungen heissen wie die Playbook-Suffixe: deploy_stag / deploy_prod.
+      # Die btc-Umgebungen heissen wie die Playbook-Suffixe:
+      # deploy_stag.yaml / deploy_prod.yaml.
       playbook: deploy_${{ inputs.environment }}.yaml
+      # Ein Tag ist einem Branch vorzuziehen, weil er sich nicht bewegt: Zwischen
+      # Freigabe und Ausfuehrung kann auf einen Branch noch gepusht werden, und
+      # dann wird etwas anderes deployt als freigegeben wurde. Der Ref muss
+      # gepusht sein - den Klon macht der Zielserver selbst, nicht der Runner.
       git-ref: ${{ inputs.git-ref }}
-    secrets:
-      ssh-private-key: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
-      ssh-known-hosts: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+    # Kein secrets-Block: Die Secrets haengen am Environment und werden im
+    # Baustein gelesen. Ein aufrufender Job darf kein `environment` setzen und
+    # saehe hier nur Repo-Secrets - also leer.

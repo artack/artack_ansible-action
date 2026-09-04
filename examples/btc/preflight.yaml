@@ -8,7 +8,7 @@ on:
 
 jobs:
   preflight:
-    uses: artack/artack_ansible-action/.github/workflows/preflight.yaml@v0.1.1
+    uses: artack/artack_ansible-action/.github/workflows/preflight.yaml@v0.2.0
     with:
       # btc/rollback_prod.yaml und rollback_stag.yaml sind untailorierte
       # dist-Vorlagen (hosts: all, ansistrano_deploy_to: /var/www/my-app). Der
@@ -16,3 +16,6 @@ jobs:
       # behoben ist, wuerde die Pruefung bei jedem Push rot leuchten, ohne dass
       # dieser Lauf etwas daran aendern kann. Nach dem Fix: Zeile entfernen.
       check-rollback: false
+    # Kein secrets-Block: Die Secrets haengen am Environment und werden im
+    # Baustein gelesen. Ein aufrufender Job darf kein `environment` setzen und
+    # saehe hier nur Repo-Secrets - also leer.

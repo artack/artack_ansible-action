@@ -19,12 +19,12 @@ on:
 
 jobs:
   rollback:
-    uses: artack/artack_ansible-action/.github/workflows/rollback.yaml@v0.1.1
+    uses: artack/artack_ansible-action/.github/workflows/rollback.yaml@v0.2.0
     with:
       # Eigenes Environment, damit Rollbacks eigene Freigeber haben koennen.
       environment: ${{ inputs.environment }}-rollback
       playbook: rollback_${{ inputs.environment }}.yaml
       confirm: ${{ inputs.confirm }}
-    secrets:
-      ssh-private-key: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
-      ssh-known-hosts: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+    # Kein secrets-Block: Die Secrets haengen am Environment und werden im
+    # Baustein gelesen. Ein aufrufender Job darf kein `environment` setzen und
+    # saehe hier nur Repo-Secrets - also leer.
