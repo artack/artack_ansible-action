@@ -50,6 +50,24 @@ on:
         required: false
         type: boolean
         default: true
+      assets-build-command:
+        description: Build-Befehl fuer Frontend-Assets, z.B. "yarn build:prod". Leer = kein Asset-Build (Projekte ohne Encore).
+        required: false
+        type: string
+        default: ""
+      assets-source:
+        required: false
+        type: string
+        default: "public/build"
+      assets-target:
+        description: Ziel als user@host:/pfad. Pflicht, wenn assets-build-command gesetzt ist.
+        required: false
+        type: string
+        default: ""
+      node-version:
+        required: false
+        type: string
+        default: "20"
 
 jobs:
   deploy:
@@ -95,6 +113,10 @@ jobs:
           ansible-version: ${{ inputs.ansible-version }}
           extra-vars: ${{ inputs.extra-vars }}
           check-target: ${{ inputs.check-target }}
+          assets-build-command: ${{ inputs.assets-build-command }}
+          assets-source: ${{ inputs.assets-source }}
+          assets-target: ${{ inputs.assets-target }}
+          node-version: ${{ inputs.node-version }}
           # Direkt aus dem Environment dieses Jobs. NICHT vom Aufrufer
           # durchreichen: Ein Job, der einen Reusable Workflow aufruft, darf
           # laut GitHub kein `environment` setzen und sieht deshalb nur Repo-

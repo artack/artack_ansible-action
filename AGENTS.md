@@ -31,6 +31,13 @@ Dieses Repository ist ein CI-Baustein fuer die Ansible-Belange unserer Projekte
   auch, dass die Zugehoerigkeit von `suissetec_metaapp_legacy` noch offen ist.
   Keine Gesamtzahl erfinden, solange das nicht entschieden ist, und keine
   Projekte ergaenzen, die nicht in der Liste stehen.
+- **Aufrufer brauchen `secrets: inherit`.** Ein Reusable Workflow bekommt nur,
+  was der Aufrufer uebergibt - kein impliziter Zugriff auf dessen
+  Secret-Speicher. Das job-level `environment` regelt nur den Vorrang bei
+  Namensgleichheit, es fuellt den secrets-Kontext nicht. Diese Zeile nicht als
+  "unnoetig" entfernen; ohne sie sind die Secrets leer.
+- **`pipx install` braucht `--force`**, sonst bleibt die auf dem Runner
+  vorinstallierte ansible-core-Version stehen und der Pin ist still unwirksam.
 - Die Projekt-Playbooks werden von diesem Repo aus **nicht** geaendert.
 - Tests: `bats tests`. Sie laufen ohne Netz und ohne Server, weil die externen
   Werkzeuge gestubbt sind. Neue Zusicherungen dort ergaenzen.

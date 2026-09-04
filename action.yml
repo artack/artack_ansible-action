@@ -38,6 +38,22 @@ inputs:
     description: Referenz fuer die Ziel-Pruefung. Leer = aus dem Namen abgeleitet (rollback_prod.yaml -> deploy_prod.yaml).
     required: false
     default: ""
+  assets-build-command:
+    description: Build-Befehl fuer Frontend-Assets, z.B. "yarn build:prod". Leer = Build und Upload komplett ueberspringen (Projekte ohne Encore).
+    required: false
+    default: ""
+  assets-source:
+    description: Verzeichnis mit den gebauten Assets, relativ zum working-directory.
+    required: false
+    default: "public/build"
+  assets-target:
+    description: Ziel als user@host:/pfad, z.B. www-btc-stag@suissetec01.nine.ch:~/public_html/shared/public/build. Pflicht, wenn assets-build-command gesetzt ist.
+    required: false
+    default: ""
+  node-version:
+    description: Node-Version fuer den Asset-Build.
+    required: false
+    default: "20"
 runs:
   using: composite
   steps:
@@ -47,8 +63,47 @@ runs:
       env:
         ANSIBLE_VERSION: ${{ inputs.ansible-version }}
       run: |
-        pipx install "${ANSIBLE_VERSION}"
+        # --force ist noetig: Auf ubuntu-latest ist ansible-core vorinstalliert,
+        # und ohne --force meldet pipx nur "already seems to be installed" und
+        # laesst die vorhandene Version stehen - der Pin waere still unwirksam.
+        # Im ersten Pilotlauf (2026-09-04) lief so 2.21.3 statt 2.16.14.
+        pipx install --force "${ANSIBLE_VERSION}"
         ansible --version
+
+    # Assets VOR dem Playbook: Der Symlink-Wechsel im Playbook schaltet den
+    # Code um, die Assets liegen in einem shared path. Begruendung der
+    # Reihenfolge in src/deploy-assets.sh.
+    - name: Setup Node
+      if: inputs.assets-build-command != ''
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: yarn
+        cache-dependency-path: ${{ inputs.working-directory }}/yarn.lock
+
+    - name: Build assets
+      if: inputs.assets-build-command != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        yarn install --frozen-lockfile
+        ${{ inputs.assets-build-command }}
+
+    - name: Deploy assets
+      if: inputs.assets-build-command != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        ARTACK_SSH_PRIVATE_KEY: ${{ inputs.ssh-private-key }}
+        ARTACK_SSH_KNOWN_HOSTS: ${{ inputs.ssh-known-hosts }}
+      run: |
+        if [ -z "${{ inputs.assets-target }}" ]; then
+          echo "::error::assets-target fehlt, obwohl assets-build-command gesetzt ist."
+          exit 1
+        fi
+        "${GITHUB_ACTION_PATH}/src/deploy-assets.sh" \
+          "${{ inputs.assets-source }}" \
+          "${{ inputs.assets-target }}"
 
     - name: Run playbook
       shell: bash

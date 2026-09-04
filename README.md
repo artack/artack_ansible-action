@@ -9,9 +9,11 @@ ein Preflight ohne Serverkontakt. Erwartet die Hauskonvention aus
 `deployment/`. Der Lauf installiert `ansible-core`, holt die Galaxy-Rollen aus
 `deployment/requirements.yml`, haelt den Deploy-Schluessel in einem ssh-agent und
 prueft den Host-Key gegen ein hinterlegtes `known_hosts`; den Git-Klon macht der
-Zielserver, deployt wird also ein gepushter Ref. Jedes Playbook laeuft als
-**Ziel-Pruefung** (genau eine Umgebung, gleiches `ansistrano_deploy_to` wie das
-Deploy-Playbook derselben Umgebung) -> **`--syntax-check`** -> **`ansible-playbook`**.
+Zielserver, deployt wird also ein gepushter Ref. Ist `assets-build-command` gesetzt, baut der Lauf zuerst die Frontend-Assets und
+liefert sie mit demselben Schluessel per `scp` aus - vor dem Symlink-Wechsel.
+Danach laeuft das Playbook als **Ziel-Pruefung** (genau eine Umgebung, gleiches
+`ansistrano_deploy_to` wie das Deploy-Playbook derselben Umgebung) ->
+**`--syntax-check`** -> **`ansible-playbook`**.
 
 ## Aufrufer
 
@@ -27,15 +29,18 @@ on:
 
 jobs:
   deploy:
-    uses: artack/artack_ansible-action/.github/workflows/deploy.yaml@v0.2.0
+    uses: artack/artack_ansible-action/.github/workflows/deploy.yaml@v0.3.0
     with:
       environment: ${{ inputs.environment }}
       playbook: deploy_${{ inputs.environment }}.yaml
       git-ref: ${{ inputs.git-ref }}
+    secrets: inherit
 ```
 
-Kein `secrets:`-Block - ein aufrufender Job darf kein `environment` setzen und
-sieht nur Repo-Secrets; der Baustein liest die Environment-Secrets selbst.
+`secrets: inherit` ist **Pflicht**. Ein Reusable Workflow bekommt nur, was der
+Aufrufer ihm uebergibt; `inherit` fuellt den Kontext, das `environment` im
+Baustein zieht dann die Environment-Secrets in den Scope. Ohne die Zeile sind
+sie leer und der Lauf bricht ab.
 
 Automatisch bei gruenen Checks: Job in den Pruef-Workflow legen, per `needs` an
 **alle** Pruef-Jobs haengen.
@@ -44,11 +49,15 @@ Automatisch bei gruenen Checks: Job in den Pruef-Workflow legen, per `needs` an
   deploy-stag:
     needs: [checker, linter]
     if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
-    uses: artack/artack_ansible-action/.github/workflows/deploy.yaml@v0.2.0
+    uses: artack/artack_ansible-action/.github/workflows/deploy.yaml@v0.3.0
     with:
       environment: stag
       playbook: deploy_stag.yaml
       git-ref: ${{ github.sha }}
+      # nur bei Projekten mit Frontend-Build:
+      assets-build-command: yarn build:prod
+      assets-target: www-btc-stag@suissetec01.nine.ch:~/public_html/shared/public/build
+    secrets: inherit
 ```
 
 ## Inputs (`deploy.yaml`)
@@ -63,6 +72,10 @@ Automatisch bei gruenen Checks: Job in den Pruef-Workflow legen, per `needs` an
 | `ansible-version` | nein | `ansible-core~=2.16.14` | leer = vorinstalliertes nehmen |
 | `extra-vars` | nein | `""` | weitere Ansible-Variablen als `key=value` |
 | `check-target` | nein | `true` | Ziel-Pruefung |
+| `assets-build-command` | nein | `""` | z.B. `yarn build:prod`; leer = kein Asset-Build |
+| `assets-source` | nein | `public/build` | Verzeichnis mit den gebauten Assets |
+| `assets-target` | nein | `""` | `user@host:/pfad`; Pflicht, wenn `assets-build-command` gesetzt ist |
+| `node-version` | nein | `20` | fuer den Asset-Build |
 | `runs-on` / `timeout-minutes` | nein | `ubuntu-latest` / `20` | |
 
 `rollback.yaml`: wie oben, aber ohne `git-ref`, mit `confirm` (muss `ROLLBACK`
@@ -78,7 +91,8 @@ sein) und `reference-playbook`; `check-target` nicht abschaltbar.
 | `DEPLOY_SSH_KNOWN_HOSTS` | `ssh-keyscan`-Ausgabe, ohne `#`-Zeilen | **Environment**, nicht Repo |
 
 Je Umgebung ein eigener Schluessel: Namen gleich, Werte verschieden. Derselbe
-Schluessel in zwei Environments hebt das Scoping auf.
+Schluessel in zwei Environments hebt das Scoping auf. Der Aufrufer braucht
+`secrets: inherit`, sonst erreichen sie den Baustein nicht.
 
 ## Einrichtung pro Umgebung
 
@@ -126,7 +140,7 @@ Deploy-Playbook - `--syntax-check` faengt das nicht.
 
 ## Versionierung
 
-Aufrufer pinnen einen Tag (`@v0.2.0`), nie einen Branch - ein Push auf `main`
+Aufrufer pinnen einen Tag (`@v0.3.0`), nie einen Branch - ein Push auf `main`
 wuerde sonst still das Deployment-Verhalten aller Aufrufer aendern.
 Schnittstellenbruch = neuer Major-Tag.
 
