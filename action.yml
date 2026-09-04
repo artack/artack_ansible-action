@@ -84,19 +84,29 @@ runs:
     # Assets VOR dem Playbook: Der Symlink-Wechsel im Playbook schaltet den
     # Code um, die Assets liegen in einem shared path. Begruendung der
     # Reihenfolge in src/deploy-assets.sh.
+    # Bewusst OHNE `cache: yarn`: Dessen Cache-Lookup ruft `yarn --version` auf,
+    # und das yarn des Runner-Images ist ein Shim auf /usr/bin/yarn, gebunden an
+    # die Standard-Node-Installation. Nach dem Node-Wechsel zeigt es ins Leere
+    # und bringt den Lauf um, bevor ein eigener yarn-Befehl laeuft
+    # ("Cannot find module '/usr/bin/yarn'", Pilotlauf 3 am 2026-09-04).
+    # Caching waere mit actions/cache auf das yarn-Cache-Verzeichnis nachruestbar.
     - name: Setup Node
       if: inputs.assets-build-command != ''
       uses: actions/setup-node@v4
       with:
         node-version: ${{ inputs.node-version }}
-        cache: yarn
-        cache-dependency-path: ${{ inputs.working-directory }}/yarn.lock
 
     - name: Build assets
       if: inputs.assets-build-command != ''
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
+        # yarn passend zur gerade eingesetzten Node-Version bereitstellen.
+        corepack enable 2>/dev/null || true
+        if ! yarn --version > /dev/null 2>&1; then
+          npm install -g yarn@1
+        fi
+        yarn --version
         yarn install --frozen-lockfile
         ${{ inputs.assets-build-command }}
 
