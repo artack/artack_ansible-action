@@ -1,8 +1,15 @@
 # Reusable Workflow: fuehrt ein Deploy-Playbook eines artack-Projekts aus.
 #
-# Warum ein Workflow und keine blosse Action: nur ein Job kann "environment"
-# (Freigabe-Gate + Secret-Scoping), "concurrency" und "permissions" setzen, und
-# nur ein Workflow darf secrets entgegennehmen.
+# Warum es diesen Workflow gibt - und was er NICHT ist: Er fuegt keine
+# Faehigkeit hinzu. `environment`, `concurrency` und `permissions` kann der Job
+# eines Aufrufers genauso setzen, und Secret-WERTE gehen ohnehin als normale
+# Inputs in die Action (die `secrets:`-Schnittstelle ist eine Bequemlichkeit,
+# keine Voraussetzung). Wer die Action direkt einbindet, verliert nichts.
+#
+# Der Grund ist ein einziger, und er steht unten bei `concurrency`: Die
+# Entscheidung `cancel-in-progress: false` ist hier einmal zentral richtig
+# gesetzt, statt in jedem Projekt neu abgeschrieben zu werden. Sie ist die
+# Sorte Detail, die beim Abschreiben verlorengeht und dann teuer wird.
 #
 # Der Aufrufer gibt den Playbook-Pfad an, sonst nichts. Alles Projektspezifische
 # steht im Playbook selbst und wird hier nicht angefasst.

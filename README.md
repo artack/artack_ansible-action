@@ -6,8 +6,9 @@ Projektspezifische steht im Playbook und wird nicht angefasst. Der Baustein
 installiert ansible, laedt den Deploy-Schluessel in einen eigenen ssh-agent,
 prueft den Host-Key gegen ein hinterlegtes `known_hosts` und ruft
 `ansible-playbook` auf. Das Verzeichnis des Playbooks ist das
-Arbeitsverzeichnis - dort liegen `ansible.cfg` und `hosts.yaml`. Reusable
-Workflows fuer Deploy, Rollback und einen Preflight ohne Serverkontakt.
+Arbeitsverzeichnis - dort liegen `ansible.cfg` und `hosts.yaml`. Ein Reusable
+Workflow fuer den Deploy liegt bei; er fuegt keine Faehigkeit hinzu, sondern
+haelt die `concurrency`-Entscheidung an einer Stelle richtig.
 
 ## Aufrufer
 
@@ -49,8 +50,9 @@ stag-Deploy per `needs` an allen Pruef-Jobs.
 | `extra-vars` | nein | `""` | weitere Ansible-Variablen als `key=value` |
 | `runs-on` / `timeout-minutes` | nein | `ubuntu-latest` / `20` | |
 
-`rollback.yaml`: wie oben, ohne `git-ref`, mit `confirm` (muss `ROLLBACK` sein).
-`preflight.yaml`: `playbook-glob`, `ansible-version`, `runs-on`.
+Wer die Action direkt in einen bestehenden Job einbindet, verliert nichts -
+`environment` und `concurrency` kann dieser Job selbst setzen, und die
+Secret-Werte gehen als normale Inputs hinein.
 
 ## Secrets
 
@@ -127,15 +129,41 @@ hat seit September 2024 keinen Commit. Der Ausweg ist, die `.stdout`-Zugriffe in
 `ansistrano_release_path.stdout | default(ansistrano_release_path)`
 umzustellen - das laeuft in beiden Generationen. Bis dahin gilt das Pinning.
 
-## Rollback
+## Rollback: bewusst kein Baustein
 
-Eigener Workflow, nur `workflow_dispatch`, eigenes Environment mit eigenen
-Freigebern, `confirm: ROLLBACK` erforderlich; teilt die `concurrency`-Gruppe mit
-dem Deploy derselben Umgebung.
+Es gibt hier **kein** Rollback-Werkzeug, und das ist Absicht. Mehrere Projekte
+tragen in `rollback_*.yaml` noch die unveraenderte dist-Vorlage: `hosts: all`
+loest auf **alle** Umgebungen des Inventars auf, und
+`ansistrano_deploy_to: /var/www/my-app` zeigt an einen Pfad, den es dort nicht
+gibt. `--syntax-check` faengt das nicht - er prueft Form, nicht Ziel.
 
-**Der Baustein prueft das Playbook nicht** - er fuehrt aus, was dasteht. Mehrere
-Projekte tragen in `rollback_*.yaml` noch die dist-Vorlage mit `hosts: all` und
-einem Platzhalterpfad. Vor der ersten Nutzung pro Projekt pruefen.
+Ein Baustein, der ausfuehrt was dasteht, wuerde daraus einen Knopf in der CI
+machen. Regel im Haus: Ein Rollback-Playbook wird nie von einem Agenten
+ausgefuehrt; es wird vorher gegen das Deploy-Playbook derselben Umgebung
+geprueft (`hosts`, `ansistrano_deploy_to`) und der Befund Sam vorgelegt.
+
+Ein Rollback laeuft von Hand:
+
+```bash
+ansible-playbook rollback_stag.yaml
+```
+
+## Submodul-Pin pruefen
+
+Ein `deployment/`-Pin auf einen Commit, den das Remote nicht kennt, faellt lokal
+nicht auf - das Arbeitsverzeichnis stimmt ja. Ein Checkout mit rekursiven
+Submodulen scheitert daran, und zwar erst beim Deployment. Als eigener Job in
+die CI des Projekts, kostet Sekunden und beruehrt keinen Server:
+
+```yaml
+  submodules:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          persist-credentials: false
+```
 
 ## Versionierung
 

@@ -13,6 +13,16 @@ Namenskonvention verlangt.
   Asset-Build und einen Token-Klon, der eine Playbook-Variable ueberschrieb.
   Alles drei ist bewusst entfernt worden, weil es projektspezifisch war und
   "out of the box" verhindert hat. Nicht wieder einbauen.
+- **Keine weiteren Reusable Workflows.** Ein Rollback- und ein
+  Preflight-Workflow gab es und sind entfernt: Der Rollback-Workflow machte aus
+  Playbooks, die teils untailorierte dist-Vorlagen sind, einen CI-Knopf und
+  widersprach damit der Hausregel; der Preflight war eine dritte versionierte
+  Schnittstelle fuer einen `--syntax-check`, den der Deploy ohnehin macht. Ein
+  Workflow rechtfertigt sich nur, wenn er eine Entscheidung an einer Stelle
+  richtig haelt - so wie `cancel-in-progress: false` in `deploy.yaml`. Er
+  rechtfertigt sich **nicht** damit, dass "nur ein Workflow Secrets annehmen
+  darf": Das gilt fuer die `secrets:`-Schnittstelle, nicht fuer Secret-Werte -
+  die gehen als normale Inputs in die Action.
 - **Aufrufer brauchen `secrets: inherit`.** Ein Reusable Workflow bekommt nur,
   was der Aufrufer uebergibt; das job-level `environment` regelt nur den Vorrang
   bei Namensgleichheit und fuellt den secrets-Kontext nicht.
