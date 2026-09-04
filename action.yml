@@ -1,0 +1,69 @@
+name: artack Ansistrano Deploy
+description: Fuehrt ein artack-Ansistrano-Playbook nicht-interaktiv auf einem Zielserver aus (Mechanik-Schicht; fuer Deployments den Reusable Workflow bevorzugen).
+inputs:
+  playbook:
+    description: Playbook relativ zum working-directory, z.B. deploy_prod.yaml oder rollback_prod.yaml.
+    required: true
+  git-ref:
+    description: Branch, Tag oder SHA, der deployt wird. Wird als "-e git_branch=<ref>" gesetzt und umgeht damit das vars_prompt. Fuer Rollback leer lassen.
+    required: false
+    default: ""
+  ssh-private-key:
+    description: Privater Deploy-Schluessel (CI -> Zielserver). Immer aus einem Secret speisen, nie literal.
+    required: true
+  ssh-known-hosts:
+    description: known_hosts-Eintrag des Zielservers (Ausgabe von ssh-keyscan). Pflicht - es wird kein StrictHostKeyChecking=no verwendet.
+    required: true
+  working-directory:
+    description: Verzeichnis mit ansible.cfg, hosts.yaml und den Playbooks.
+    required: false
+    default: "."
+  galaxy-requirements:
+    description: Requirements-Datei fuer die Ansistrano-Rollen. Leer = Schritt ueberspringen (fuer Projekte ohne deployment/-Submodul).
+    required: false
+    default: "deployment/requirements.yml"
+  ansible-version:
+    description: pip-Spezifikation von ansible-core. Leer = bereits installiertes ansible-core verwenden.
+    required: false
+    default: "ansible-core~=2.16.14"
+  extra-vars:
+    description: Zusaetzliche Ansible-Variablen als key=value (eine Zeichenkette, wird als weiteres -e uebergeben).
+    required: false
+    default: ""
+  check-target:
+    description: Prueft vor dem Lauf, dass das Playbook auf genau eine Umgebung zeigt und dasselbe ansistrano_deploy_to hat wie das Deploy-Playbook derselben Umgebung. Nur mit gutem Grund abschalten.
+    required: false
+    default: "true"
+  reference-playbook:
+    description: Referenz fuer die Ziel-Pruefung. Leer = aus dem Namen abgeleitet (rollback_prod.yaml -> deploy_prod.yaml).
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Install ansible-core
+      if: inputs.ansible-version != ''
+      shell: bash
+      env:
+        ANSIBLE_VERSION: ${{ inputs.ansible-version }}
+      run: |
+        pipx install "${ANSIBLE_VERSION}"
+        ansible --version
+
+    - name: Run playbook
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        # Die Geheimnisse gehen ueber die Umgebung, nicht ueber die Kommandozeile:
+        # eine Interpolation im run-Body wuerde sie in das Shell-Skript auf der
+        # Platte schreiben.
+        ARTACK_SSH_PRIVATE_KEY: ${{ inputs.ssh-private-key }}
+        ARTACK_SSH_KNOWN_HOSTS: ${{ inputs.ssh-known-hosts }}
+      run: |
+        "${GITHUB_ACTION_PATH}/src/run-playbook.sh" \
+          "${{ inputs.playbook }}" \
+          "${{ inputs.git-ref }}" \
+          "${{ inputs.galaxy-requirements }}" \
+          "${{ inputs.extra-vars }}" \
+          "${{ inputs.check-target == 'true' && '1' || '0' }}" \
+          "${{ inputs.reference-playbook }}"

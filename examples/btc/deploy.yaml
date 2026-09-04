@@ -1,0 +1,38 @@
+# Aufrufer fuer btc (suissetec_building-technology-calculator).
+# Ziel: .github/workflows/deploy.yaml im btc-Repo - als EIGENE Datei, nicht in
+# linter.yaml hineingemischt: Pruefung und Deployment sind getrennte Anlaesse
+# mit getrennten Rechten.
+#
+# Erhoben am 2026-09-04 aus hosts.yaml und den Playbooks:
+#   prod  hosts btc-prod  user www-btc-prod  ~/public_html  Default-Branch master
+#   stag  hosts btc-stag  user www-btc-stag  ~/public_html  Default-Branch develop
+#
+# Es fehlen nur noch die beiden Environment-Secrets (siehe README).
+name: deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Zielumgebung
+        required: true
+        type: choice
+        options: [stag, prod]
+      git-ref:
+        description: Branch, Tag oder SHA. Ein Tag ist vorzuziehen - er bewegt sich nicht zwischen Freigabe und Ausfuehrung.
+        required: true
+        type: string
+
+jobs:
+  deploy:
+    # Fester Versions-Tag, kein @main: ein Push auf main duerfte nicht still das
+    # Deployment-Verhalten aendern. Begruendung im README.
+    uses: artack/artack_ansible-action/.github/workflows/deploy.yaml@v0.1.0
+    with:
+      environment: ${{ inputs.environment }}
+      # btc-Umgebungen heissen wie die Playbook-Suffixe: deploy_stag / deploy_prod.
+      playbook: deploy_${{ inputs.environment }}.yaml
+      git-ref: ${{ inputs.git-ref }}
+    secrets:
+      ssh-private-key: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+      ssh-known-hosts: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}

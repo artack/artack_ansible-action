@@ -1,0 +1,18 @@
+# Aufrufer fuer btc. Ziel: .github/workflows/preflight.yaml im btc-Repo.
+# Kein Serverkontakt, keine Secrets - kann vor dem Deploy-Piloten eingelegt werden.
+name: preflight
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  preflight:
+    uses: artack/artack_ansible-action/.github/workflows/preflight.yaml@v0.1.0
+    with:
+      # btc/rollback_prod.yaml und rollback_stag.yaml sind untailorierte
+      # dist-Vorlagen (hosts: all, ansistrano_deploy_to: /var/www/my-app). Der
+      # Befund ist bekannt und steht in der Einrichtungs-Checkliste; bis er
+      # behoben ist, wuerde die Pruefung bei jedem Push rot leuchten, ohne dass
+      # dieser Lauf etwas daran aendern kann. Nach dem Fix: Zeile entfernen.
+      check-rollback: false

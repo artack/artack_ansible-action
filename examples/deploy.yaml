@@ -1,0 +1,26 @@
+# Kommt so in ein Projekt: .github/workflows/deploy.yaml
+name: deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Zielumgebung
+        required: true
+        type: choice
+        options: [stag, prod]
+      git-ref:
+        description: Branch, Tag oder SHA
+        required: true
+        type: string
+
+jobs:
+  deploy:
+    uses: artack/artack_ansible-action/.github/workflows/deploy.yaml@v0.1.0
+    with:
+      environment: ${{ inputs.environment }}
+      playbook: deploy_${{ inputs.environment }}.yaml
+      git-ref: ${{ inputs.git-ref }}
+    secrets:
+      ssh-private-key: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+      ssh-known-hosts: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}

@@ -1,0 +1,105 @@
+# Reusable Workflow: Preflight ohne Serverkontakt.
+#
+# Deckt die Fehlerklassen auf, die sonst erst beim dringenden Deployment
+# auffallen:
+#   1. Submodul-Pin auf einen Commit, den das Remote nicht kennt (lokal
+#      unauffaellig, solange das Arbeitsverzeichnis stimmt).
+#   2. Playbook-Syntax.
+#   3. Ziel-Abweichung: Playbooks, die auf die falsche oder auf mehr als eine
+#      Umgebung zeigen - der "hosts: all"-Fall aus den dist-Vorlagen.
+#
+# Beruehrt keinen Server und braucht keine Secrets.
+name: artack ansistrano preflight
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        required: false
+        type: string
+        default: "."
+      galaxy-requirements:
+        required: false
+        type: string
+        default: "deployment/requirements.yml"
+      ansible-version:
+        required: false
+        type: string
+        default: "ansible-core~=2.16.14"
+      runs-on:
+        required: false
+        type: string
+        default: "ubuntu-latest"
+      check-rollback:
+        description: Rollback-Playbooks mitpruefen. Aus lassen, solange sie bekannt untailoriert sind - dann meldet der Preflight einen Befund, der nicht in diesem Lauf zu beheben ist.
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  preflight:
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout with submodules
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Checkout deploy action
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .artack-deploy
+          persist-credentials: false
+
+      - name: Install ansible-core
+        if: inputs.ansible-version != ''
+        env:
+          ANSIBLE_VERSION: ${{ inputs.ansible-version }}
+        run: |
+          pipx install "${ANSIBLE_VERSION}"
+          ansible --version
+
+      - name: Install roles
+        if: inputs.galaxy-requirements != ''
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          REQUIREMENTS: ${{ inputs.galaxy-requirements }}
+        run: ansible-galaxy install -r "${REQUIREMENTS}"
+
+      - name: Syntax check
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          shopt -s nullglob
+          for playbook in deploy_*.yaml rollback_*.yaml; do
+            echo "::group::${playbook}"
+            # git_branch wird gesetzt, damit das vars_prompt nicht greift.
+            ansible-playbook "${playbook}" -e git_branch=preflight --syntax-check < /dev/null
+            echo "::endgroup::"
+          done
+
+      - name: Target check
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          CHECK_ROLLBACK: ${{ inputs.check-rollback }}
+        run: |
+          shopt -s nullglob
+          checker="${GITHUB_WORKSPACE}/.artack-deploy/src/check-playbook-target.sh"
+          playbooks=(deploy_*.yaml)
+          if [[ "${CHECK_ROLLBACK}" == "true" ]]; then
+            playbooks+=(rollback_*.yaml)
+          else
+            echo "::warning::Rollback-Playbooks nicht geprueft (check-rollback: false). Der Fix gehoert in die Einrichtungs-Checkliste dieses Projekts."
+          fi
+          failed=0
+          for playbook in "${playbooks[@]}"; do
+            echo "::group::${playbook}"
+            "${checker}" "${playbook}" || failed=1
+            echo "::endgroup::"
+          done
+          exit "${failed}"

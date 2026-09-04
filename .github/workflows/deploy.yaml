@@ -1,0 +1,121 @@
+# Reusable Workflow: deployt ein artack-Ansistrano-Projekt.
+#
+# Warum ein Workflow und keine blosse Action: nur ein Job kann "environment"
+# (Freigabe-Gate + Secret-Scoping), "concurrency" und "permissions" setzen, und
+# nur ein Workflow darf ueberhaupt secrets entgegennehmen.
+name: artack ansistrano deploy
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: GitHub Environment (traegt Freigabe-Regeln und die beiden Secrets), z.B. prod oder stag.
+        required: true
+        type: string
+      playbook:
+        description: Playbook, z.B. deploy_prod.yaml.
+        required: true
+        type: string
+      git-ref:
+        description: Branch, Tag oder SHA, der deployt wird. Ein Tag ist einem Branch vorzuziehen - er bewegt sich nicht.
+        required: true
+        type: string
+      working-directory:
+        required: false
+        type: string
+        default: "."
+      galaxy-requirements:
+        description: Leer setzen, wenn das Projekt kein deployment/-Submodul mit requirements.yml hat.
+        required: false
+        type: string
+        default: "deployment/requirements.yml"
+      ansible-version:
+        required: false
+        type: string
+        default: "ansible-core~=2.16.14"
+      runs-on:
+        required: false
+        type: string
+        default: "ubuntu-latest"
+      timeout-minutes:
+        required: false
+        type: number
+        default: 20
+      extra-vars:
+        required: false
+        type: string
+        default: ""
+      check-target:
+        description: Prueft vor dem Lauf, dass das Playbook auf genau eine Umgebung zeigt. Nur mit gutem Grund abschalten.
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      ssh-private-key:
+        description: Privater Deploy-Schluessel des CI-Nutzers auf dem Zielserver.
+        required: true
+      ssh-known-hosts:
+        description: known_hosts-Eintrag des Zielservers (ssh-keyscan).
+        required: true
+
+jobs:
+  deploy:
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    environment:
+      name: ${{ inputs.environment }}
+    # Zwei Deployments auf dieselbe Umgebung duerfen sich nicht ueberholen.
+    # cancel-in-progress bleibt aus: ein halb abgebrochenes Deployment ist
+    # schlimmer als ein wartendes.
+    concurrency:
+      group: artack-deploy-${{ github.repository }}-${{ inputs.environment }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    steps:
+      # Das Submodul deployment/ ist Pflicht: es liefert die Hooks, auf die die
+      # Playbooks per playbook_dir verweisen, und die requirements.yml.
+      - name: Checkout project
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.git-ref }}
+          submodules: recursive
+          persist-credentials: false
+
+      # Der Baustein wird in genau der Fassung geholt, in der dieser Workflow
+      # aufgerufen wurde - Workflow und Action koennen so nicht auseinanderlaufen.
+      - name: Checkout deploy action
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .artack-deploy
+          persist-credentials: false
+
+      - name: Deploy
+        uses: ./.artack-deploy
+        with:
+          playbook: ${{ inputs.playbook }}
+          git-ref: ${{ inputs.git-ref }}
+          working-directory: ${{ inputs.working-directory }}
+          galaxy-requirements: ${{ inputs.galaxy-requirements }}
+          ansible-version: ${{ inputs.ansible-version }}
+          extra-vars: ${{ inputs.extra-vars }}
+          check-target: ${{ inputs.check-target }}
+          ssh-private-key: ${{ secrets.ssh-private-key }}
+          ssh-known-hosts: ${{ secrets.ssh-known-hosts }}
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Deployment ${{ job.status }}"
+            echo ""
+            echo "| Feld | Wert |"
+            echo "| --- | --- |"
+            echo "| Umgebung | ${{ inputs.environment }} |"
+            echo "| Playbook | ${{ inputs.playbook }} |"
+            echo "| Ref | ${{ inputs.git-ref }} |"
+            echo "| Commit | ${{ github.sha }} |"
+            echo "| Ausgeloest von | ${{ github.actor }} |"
+          } >> "${GITHUB_STEP_SUMMARY}"

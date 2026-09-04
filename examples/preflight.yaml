@@ -1,0 +1,11 @@
+# Kommt so in ein Projekt: .github/workflows/preflight.yaml
+# Beruehrt keinen Server, braucht keine Secrets.
+name: preflight
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  preflight:
+    uses: artack/artack_ansible-action/.github/workflows/preflight.yaml@v0.1.0

@@ -1,0 +1,30 @@
+# Kommt so in ein Projekt: .github/workflows/rollback.yaml
+#
+# Erst einlegen, wenn die rollback_*.yaml des Projekts die Ziel-Pruefung
+# bestehen - siehe Einrichtungs-Checkliste im README.
+name: rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Zielumgebung
+        required: true
+        type: choice
+        options: [stag, prod]
+      confirm:
+        description: Zur Bestaetigung ROLLBACK eintippen
+        required: true
+        type: string
+
+jobs:
+  rollback:
+    uses: artack/artack_ansible-action/.github/workflows/rollback.yaml@v0.1.0
+    with:
+      # Eigenes Environment, damit Rollbacks eigene Freigeber haben koennen.
+      environment: ${{ inputs.environment }}-rollback
+      playbook: rollback_${{ inputs.environment }}.yaml
+      confirm: ${{ inputs.confirm }}
+    secrets:
+      ssh-private-key: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+      ssh-known-hosts: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
