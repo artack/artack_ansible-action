@@ -68,6 +68,11 @@ on:
         required: false
         type: string
         default: "20"
+      clone-with-github-token:
+        description: Zielserver klont per HTTPS mit dem Lauf-Token statt per ssh://. Braucht ein Repo auf github.com.
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   deploy:
@@ -117,6 +122,11 @@ jobs:
           assets-source: ${{ inputs.assets-source }}
           assets-target: ${{ inputs.assets-target }}
           node-version: ${{ inputs.node-version }}
+          clone-with-github-token: ${{ inputs.clone-with-github-token }}
+          # github.token des AUFRUFENDEN Repos: laut Doku "scoped to the invoking
+          # repository and expires after job completion". Genau das, was der
+          # Server zum Klonen braucht - kein Deploy Key, kein PAT.
+          github-token: ${{ github.token }}
           # Direkt aus dem Environment dieses Jobs. NICHT vom Aufrufer
           # durchreichen: Ein Job, der einen Reusable Workflow aufruft, darf
           # laut GitHub kein `environment` setzen und sieht deshalb nur Repo-

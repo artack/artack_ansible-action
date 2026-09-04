@@ -76,6 +76,7 @@ Automatisch bei gruenen Checks: Job in den Pruef-Workflow legen, per `needs` an
 | `assets-source` | nein | `public/build` | Verzeichnis mit den gebauten Assets |
 | `assets-target` | nein | `""` | `user@host:/pfad`; Pflicht, wenn `assets-build-command` gesetzt ist |
 | `node-version` | nein | `20` | fuer den Asset-Build |
+| `clone-with-github-token` | nein | `false` | Zielserver klont per HTTPS mit dem Lauf-Token statt per `ssh://` |
 | `runs-on` / `timeout-minutes` | nein | `ubuntu-latest` / `20` | |
 
 `rollback.yaml`: wie oben, aber ohne `git-ref`, mit `confirm` (muss `ROLLBACK`
@@ -93,6 +94,29 @@ sein) und `reference-playbook`; `check-target` nicht abschaltbar.
 Je Umgebung ein eigener Schluessel: Namen gleich, Werte verschieden. Derselbe
 Schluessel in zwei Environments hebt das Scoping auf. Der Aufrufer braucht
 `secrets: inherit`, sonst erreichen sie den Baustein nicht.
+
+## Wie der Zielserver an das Repository kommt
+
+`ansistrano_deploy_via: git` heisst: **der Zielserver** klont, nicht der Runner.
+Bei einem manuellen Deploy authentisiert er sich mit dem weitergeleiteten
+SSH-Agenten des Menschen - in der CI gibt es den nicht.
+
+`clone-with-github-token: true` loest das mit dem `GITHUB_TOKEN` des Laufs, laut
+GitHub-Doku *"scoped to the invoking repository and expires after job
+completion"* und dort als bevorzugte Methode vor Deploy Keys und PATs genannt.
+Der Baustein setzt fuer den Lauf per `-e`
+
+```
+ansistrano_git_repo=https://x-access-token:<token>@github.com/<owner>/<repo>.git
+```
+
+und setzt die Remote-URL danach auf den Wert aus dem Playbook zurueck, damit im
+`.git/config` des Servers kein Token liegenbleibt. **Das Playbook bleibt auf
+`ssh://`** - manuelle Deployments ueber die Agent-Weiterleitung sind unberuehrt.
+
+Voraussetzung ist `contents: read`. Der aufrufende Job kann die Rechte nur
+einschraenken, nicht erweitern; der Baustein setzt selbst
+`permissions: contents: read`.
 
 ## Einrichtung pro Umgebung
 

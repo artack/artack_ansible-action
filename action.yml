@@ -54,6 +54,14 @@ inputs:
     description: Node-Version fuer den Asset-Build.
     required: false
     default: "20"
+  clone-with-github-token:
+    description: Laesst den Zielserver per HTTPS mit dem kurzlebigen GITHUB_TOKEN des Laufs klonen statt per ssh://. Nur fuer Projekte, deren Repo auf github.com liegt.
+    required: false
+    default: "false"
+  github-token:
+    description: Token fuer den HTTPS-Klon. Im Reusable Workflow automatisch github.token; braucht contents read.
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
@@ -135,6 +143,7 @@ runs:
         # Platte schreiben.
         ARTACK_SSH_PRIVATE_KEY: ${{ inputs.ssh-private-key }}
         ARTACK_SSH_KNOWN_HOSTS: ${{ inputs.ssh-known-hosts }}
+        ARTACK_GITHUB_TOKEN: ${{ inputs.github-token }}
       run: |
         "${GITHUB_ACTION_PATH}/src/run-playbook.sh" \
           "${{ inputs.playbook }}" \
@@ -142,4 +151,5 @@ runs:
           "${{ inputs.galaxy-requirements }}" \
           "${{ inputs.extra-vars }}" \
           "${{ inputs.check-target == 'true' && '1' || '0' }}" \
-          "${{ inputs.reference-playbook }}"
+          "${{ inputs.reference-playbook }}" \
+          "${{ inputs.clone-with-github-token == 'true' && '1' || '0' }}"

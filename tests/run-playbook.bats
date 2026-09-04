@@ -28,6 +28,10 @@ EOF
 #!/usr/bin/env bash
 echo "ansible-galaxy $*" >> "${WORK}/calls.log"
 EOF
+  cat > "${STUBS}/ansible" <<'EOF'
+#!/usr/bin/env bash
+echo "ansible $*" >> "${WORK}/calls.log"
+EOF
   chmod +x "${STUBS}"/*
   export WORK
   export PATH="${STUBS}:${PATH}"
@@ -122,4 +126,31 @@ teardown() {
   [ "${status}" -eq 0 ]
   [[ "${output}" == *"Ziel-Pruefung uebersprungen"* ]]
   ! grep -q -- "--list-hosts" "${WORK}/calls.log"
+}
+
+@test "klont per HTTPS mit dem Lauf-Token, wenn angefordert" {
+  ARTACK_GITHUB_TOKEN=ghs_test GITHUB_REPOSITORY=artack/x \
+    run "${SCRIPT}" deploy_prod.yaml master "" "" 1 "" 1
+  [ "${status}" -eq 0 ]
+  grep -q -- "ansistrano_git_repo=https://x-access-token:ghs_test@github.com/artack/x.git" "${WORK}/calls.log"
+}
+
+@test "setzt die Remote-URL danach auf den Wert aus dem Playbook zurueck" {
+  printf '    ansistrano_deploy_to: "~/public_html"\n    ansistrano_git_repo: ssh://git@github.com/artack/x.git\n' > deploy_prod.yaml
+  ARTACK_GITHUB_TOKEN=ghs_test GITHUB_REPOSITORY=artack/x \
+    run "${SCRIPT}" deploy_prod.yaml master "" "" 1 "" 1
+  [ "${status}" -eq 0 ]
+  grep -q "git remote set-url origin 'ssh://git@github.com/artack/x.git'" "${WORK}/calls.log"
+}
+
+@test "bricht ab, wenn der HTTPS-Klon angefordert ist aber kein Token da ist" {
+  GITHUB_REPOSITORY=artack/x run "${SCRIPT}" deploy_prod.yaml master "" "" 1 "" 1
+  [ "${status}" -ne 0 ]
+  [[ "${output}" == *"ARTACK_GITHUB_TOKEN"* ]]
+}
+
+@test "ohne Token-Klon wird die Remote-URL nicht angetastet" {
+  run "${SCRIPT}" deploy_prod.yaml master "" "" 1 "" 0
+  [ "${status}" -eq 0 ]
+  ! grep -q "remote set-url" "${WORK}/calls.log"
 }
