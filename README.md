@@ -52,7 +52,7 @@ jobs:
           submodules: recursive
           persist-credentials: false
 
-      - uses: artack/artack_ansible-action@<tag>
+      - uses: artack/artack_ansible-action@v1.0.0
         with:
           playbook: deploy_${{ inputs.environment }}.yaml
           git-ref: ${{ inputs.git-ref }}
@@ -233,8 +233,11 @@ die CI des Projekts, kostet Sekunden und beruehrt keinen Server:
 
 ## Versionierung
 
-Aufrufer pinnen einen Tag, nie einen Branch - ein Push auf `main` wuerde sonst
-still das Verhalten aller Aufrufer aendern. Schnittstellenbruch = neuer
+Aktuell: **`v1.0.0`**.
+
+Aufrufer pinnen eine unveraenderliche Version, nie einen Branch und **kein
+mitwanderndes `v1`** - beides wuerde das Verhalten aller Aufrufer aendern, ohne
+dass jemand im betroffenen Projekt etwas sieht. Schnittstellenbruch = neuer
 Major-Tag.
 
 ## Tests
