@@ -128,6 +128,14 @@ Baustein benutzt das Playbook **des deployten Refs**. Vor dem ersten Deployment
 Serverkontakt); bei untailorierten `rollback_*.yaml` mit
 `check-rollback: false` starten.
 
+Reihenfolge bei der Einrichtung, jeweils eine Variable pro Lauf:
+
+1. Baustein per **Commit-SHA** referenzieren, nicht per Tag.
+2. **Ohne** `assets-build-command` deployen - beweist Secrets, SSH-Zugang und
+   Ansistrano.
+3. Danach den Asset-Build einschalten.
+4. Beides gruen: auf einen Tag umstellen.
+
 ## Rollback
 
 Eigener Workflow, nur `workflow_dispatch`, eigenes Environment (z.B.
@@ -140,9 +148,19 @@ Deploy-Playbook - `--syntax-check` faengt das nicht.
 
 ## Versionierung
 
-Aufrufer pinnen einen Tag (`@v0.3.1`), nie einen Branch - ein Push auf `main`
+**Im Betrieb** pinnen Aufrufer einen Tag, nie einen Branch - ein Push auf `main`
 wuerde sonst still das Deployment-Verhalten aller Aufrufer aendern.
 Schnittstellenbruch = neuer Major-Tag.
+
+**Waehrend der Einrichtung** pinnen sie einen **Commit-SHA**:
+
+```yaml
+uses: artack/artack_ansible-action/.github/workflows/deploy.yaml@8c143ebd1bc5431af71c646601699b9ae0ee6099
+```
+
+Ein SHA ist genauso unveraenderlich wie ein Tag, verbraucht aber keine
+Versionsnummer, solange noch iteriert wird. Umstellen auf den Tag, sobald das
+Projekt gruen deployt.
 
 
 ## Tests
