@@ -25,7 +25,7 @@ on:
       ansible-version:
         required: false
         type: string
-        default: "ansible-core~=2.16.14"
+        default: "ansible~=9.13.0"
       runs-on:
         required: false
         type: string

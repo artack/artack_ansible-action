@@ -27,9 +27,9 @@ inputs:
     required: false
     default: ""
   ansible-version:
-    description: pip-Spezifikation von ansible-core. Leer = bereits installiertes ansible-core verwenden.
+    description: "pip-Spezifikation. Default ist die volle ansible-Distribution statt ansible-core - die Hooks des deployment/-Submoduls benutzen Module aus community.general (z.B. htpasswd), und ansible-core bringt keine Collections mit. ansible 9.13 entspricht core 2.16 und dem Stand der Entwicklermaschinen. Leer = vorinstalliertes nehmen."
     required: false
-    default: "ansible-core~=2.16.14"
+    default: "ansible~=9.13.0"
   extra-vars:
     description: Zusaetzliche Ansible-Variablen als key=value (eine Zeichenkette, wird als weiteres -e uebergeben).
     required: false
@@ -91,6 +91,7 @@ runs:
         "${venv}/bin/pip" install --quiet "${ANSIBLE_VERSION}"
         # GITHUB_PATH greift erst im naechsten Schritt, darum hier absolut.
         "${venv}/bin/ansible" --version
+        "${venv}/bin/ansible-galaxy" collection list 2>/dev/null | head -20 || true
         echo "${venv}/bin" >> "${GITHUB_PATH}"
 
     # Assets VOR dem Playbook: Der Symlink-Wechsel im Playbook schaltet den

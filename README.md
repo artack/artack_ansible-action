@@ -69,7 +69,7 @@ Automatisch bei gruenen Checks: Job in den Pruef-Workflow legen, per `needs` an
 | `git-ref` | ja | - | Branch, Tag oder SHA; wird als `-e git_branch=` gesetzt |
 | `working-directory` | nein | `.` | Verzeichnis mit `ansible.cfg` |
 | `galaxy-requirements` | nein | `deployment/requirements.yml` | leer = Galaxy-Schritt ueberspringen |
-| `ansible-version` | nein | `ansible-core~=2.16.14` | leer = vorinstalliertes nehmen |
+| `ansible-version` | nein | `ansible~=9.13.0` | volle Distribution, nicht `ansible-core` - die Hooks brauchen `community.general` |
 | `extra-vars` | nein | `""` | weitere Ansible-Variablen als `key=value` |
 | `check-target` | nein | `true` | Ziel-Pruefung |
 | `assets-build-command` | nein | `""` | z.B. `yarn build:prod`; leer = kein Asset-Build |
