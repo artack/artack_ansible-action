@@ -6,53 +6,94 @@ Projektspezifische steht im Playbook und wird nicht angefasst. Der Baustein
 installiert ansible, laedt den Deploy-Schluessel in einen eigenen ssh-agent,
 prueft den Host-Key gegen ein hinterlegtes `known_hosts` und ruft
 `ansible-playbook` auf. Das Verzeichnis des Playbooks ist das
-Arbeitsverzeichnis - dort liegen `ansible.cfg` und `hosts.yaml`. Ein Reusable
-Workflow fuer den Deploy liegt bei; er fuegt keine Faehigkeit hinzu, sondern
-haelt die `concurrency`-Entscheidung an einer Stelle richtig.
+Arbeitsverzeichnis - dort liegen `ansible.cfg` und `hosts.yaml`. Das Projekt
+bindet die Action als Step in einen eigenen Job ein; einen Reusable Workflow
+stellt dieses Repo bewusst nicht bereit.
 
-## Aufrufer
+## Einbinden
+
+Ein Job im Projekt, der die Action als Step aufruft. Das ist der Weg - dieses
+Repo stellt keinen Reusable Workflow bereit, damit das Projekt eigene Steps
+(z.B. einen Frontend-Build) in denselben Job legen kann.
 
 ```yaml
 # .github/workflows/deploy.yaml
 name: deploy
+
 on:
   workflow_dispatch:
     inputs:
       environment: {required: true, type: choice, options: [stag, prod]}
       git-ref: {required: true, type: string}
 
+permissions:
+  contents: read
+
 jobs:
   deploy:
-    uses: artack/artack_ansible-action/.github/workflows/deploy.yaml@<tag>
-    with:
-      environment: ${{ inputs.environment }}
-      playbook: deploy_${{ inputs.environment }}.yaml
-      git-ref: ${{ inputs.git-ref }}
-    secrets: inherit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Traegt die Secrets und das Freigabe-Gate.
+    environment: ${{ inputs.environment }}
+    # Zwei Deployments auf dieselbe Umgebung duerfen sich nicht ueberholen.
+    # cancel-in-progress MUSS false bleiben: Ein Abbruch mitten im
+    # Symlink-Wechsel hinterlaesst ein halbes Deployment - neuer Code live,
+    # after_symlink-Hooks (opcache, Messenger) nicht gelaufen.
+    concurrency:
+      group: deploy-${{ github.repository }}-${{ inputs.environment }}
+      cancel-in-progress: false
+    steps:
+      # submodules: recursive ist Pflicht. Ohne das ist deployment/ leer und die
+      # Hooks fehlen, auf die die Playbooks per playbook_dir verweisen - die
+      # haeufigste Fehlerquelle beim Einrichten.
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.git-ref }}
+          submodules: recursive
+          persist-credentials: false
+
+      - uses: artack/artack_ansible-action@<tag>
+        with:
+          playbook: deploy_${{ inputs.environment }}.yaml
+          git-ref: ${{ inputs.git-ref }}
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          ssh-known-hosts: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
 ```
 
-`secrets: inherit` ist Pflicht - ein Reusable Workflow bekommt nur, was der
-Aufrufer uebergibt, und ein aufrufender Job darf kein `environment` setzen.
+**Achtung bei `concurrency` auf Workflow-Ebene.** Steht dort
+`cancel-in-progress: true`, wird der **ganze Lauf** abgebrochen, wenn ein neuer
+Push dieselbe Gruppe trifft - der Deploy-Job stirbt mit, mitten im
+`ansible-playbook`. Die Job-Einstellung oben schuetzt davor **nicht**. Wer
+Deployment und Pruefung in einem Workflow hat, schliesst den Deploy-Branch aus:
 
-Weitere Vorlagen in [`examples/`](examples/), darunter der automatische
-stag-Deploy per `needs` an allen Pruef-Jobs.
+```yaml
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/develop' }}
+```
+
+**Automatisch, sobald alle Checks gruen sind:** denselben Job in den bestehenden
+Pruef-Workflow legen, mit `needs: [<alle Pruef-Jobs>]` und
+`if: github.event_name == 'push' && github.ref == 'refs/heads/develop'`, und
+`git-ref: ${{ github.sha }}` - der exakte Commit, weil ein Branch zwischen
+Trigger und Ausfuehrung weiterwandern kann. Wird ein Pruef-Job ergaenzt, muss er
+in `needs` nachgetragen werden, sonst deployt der Job daran vorbei.
 
 ## Inputs
 
 | Name | Pflicht | Default | Bedeutung |
 | --- | --- | --- | --- |
-| `environment` | ja | - | GitHub Environment; traegt Secrets und Freigabe-Regeln |
 | `playbook` | ja | - | Pfad im Repository, z.B. `deploy_stag.yaml` |
-| `git-ref` | ja | - | Branch, Tag oder SHA; wird als `-e git_branch=` gesetzt |
+| `git-ref` | nein | `""` | Branch, Tag oder SHA; wird als `-e git_branch=` gesetzt |
+| `ssh-private-key` | ja | - | privater Deploy-Schluessel, aus einem Secret |
+| `ssh-known-hosts` | ja | - | `ssh-keyscan`-Ausgabe des Zielservers |
 | `ansible-version` | nein | `ansible~=9.13.0` | volle Distribution, nicht `ansible-core` - die Playbooks brauchen `community.general` |
 | `galaxy-requirements-inline` | nein | eingebaute Pins | Requirements-YAML als Text, Override |
 | `galaxy-requirements` | nein | `""` | Pfad zu einer Requirements-Datei; nur setzen, wenn sie Versionen pinnt |
 | `extra-vars` | nein | `""` | weitere Ansible-Variablen als `key=value` |
-| `runs-on` / `timeout-minutes` | nein | `ubuntu-latest` / `20` | |
 
-Wer die Action direkt in einen bestehenden Job einbindet, verliert nichts -
-`environment` und `concurrency` kann dieser Job selbst setzen, und die
-Secret-Werte gehen als normale Inputs hinein.
+`runs-on`, `timeout-minutes`, `environment` und `concurrency` setzt der Job des
+Projekts selbst - siehe Block oben.
 
 ## Secrets
 

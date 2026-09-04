@@ -13,19 +13,32 @@ Namenskonvention verlangt.
   Asset-Build und einen Token-Klon, der eine Playbook-Variable ueberschrieb.
   Alles drei ist bewusst entfernt worden, weil es projektspezifisch war und
   "out of the box" verhindert hat. Nicht wieder einbauen.
-- **Keine weiteren Reusable Workflows.** Ein Rollback- und ein
-  Preflight-Workflow gab es und sind entfernt: Der Rollback-Workflow machte aus
-  Playbooks, die teils untailorierte dist-Vorlagen sind, einen CI-Knopf und
-  widersprach damit der Hausregel; der Preflight war eine dritte versionierte
-  Schnittstelle fuer einen `--syntax-check`, den der Deploy ohnehin macht. Ein
-  Workflow rechtfertigt sich nur, wenn er eine Entscheidung an einer Stelle
-  richtig haelt - so wie `cancel-in-progress: false` in `deploy.yaml`. Er
-  rechtfertigt sich **nicht** damit, dass "nur ein Workflow Secrets annehmen
-  darf": Das gilt fuer die `secrets:`-Schnittstelle, nicht fuer Secret-Werte -
-  die gehen als normale Inputs in die Action.
-- **Aufrufer brauchen `secrets: inherit`.** Ein Reusable Workflow bekommt nur,
-  was der Aufrufer uebergibt; das job-level `environment` regelt nur den Vorrang
-  bei Namensgleichheit und fuellt den secrets-Kontext nicht.
+- **Dieses Repo stellt Aufrufern GAR KEINE Reusable Workflows bereit.** Nur die
+  Action und die eigene CI (`test.yml`). Es gab einmal drei
+  (`deploy`, `rollback`, `preflight`), alle entfernt. Die Regel gilt, damit sie
+  nicht als "Komfort" zurueckkommt - hier sind die Gruende, damit sie nicht neu
+  erfunden werden muessen:
+  - **Kein Faehigkeitsgewinn.** `environment`, `concurrency` und `permissions`
+    setzt der Job des Projekts genauso. Secret-**Werte** gehen als normale
+    Inputs in die Action; "composite actions cannot use secrets" meint die
+    `secrets:`-Schnittstelle, nicht die Werte.
+  - **Ein Job mit `uses:` kann keine eigenen `steps` haben.** Erlaubt sind laut
+    Doku nur `name, uses, with, secrets, strategy, needs, if, concurrency,
+    permissions`. Ein Projekt koennte seinen Frontend-Build also nicht in
+    denselben Job legen - genau das braucht btc (yarn build, dann deployen).
+  - **`environment` fehlt in derselben Liste.** Darum brauchte der
+    Workflow-Weg `secrets: inherit`; daran ist Pilotlauf 1 gescheitert. Direkt
+    eingebunden setzt der Job sein `environment` selbst und liest die Secrets
+    ohne Umweg.
+  - **Zentrale `concurrency` war ein Trugschluss** (mein Argument, widerlegt):
+    Setzt der Aufrufer auf **Workflow**-Ebene `cancel-in-progress: true`, wird
+    der ganze Lauf abgebrochen und die Jobs des aufgerufenen Workflows sterben
+    mit. Die Job-Einstellung im Baustein schuetzt gegen genau den Fall nicht.
+  - Kosten waren real: eine zweite versionierte Schnittstelle mit neun
+    gespiegelten Inputs, die bei jeder Aenderung mitgepflegt werden muss.
+- **Der Job des Aufrufers setzt `environment`**, dann loest
+  `secrets.DEPLOY_SSH_PRIVATE_KEY` dort direkt auf. Kein `secrets: inherit`,
+  kein Durchreichen.
 - **Kein `StrictHostKeyChecking=no`** und kein stiller Rueckfall, wenn
   `known_hosts` fehlt. Die Tests halten das fest.
 - **`-e git_branch=<ref>` ist Pflicht** bei Playbooks mit `vars_prompt`: Bei
