@@ -1,0 +1,23 @@
+# Automatisch auf stag, sobald alle Checks gruen sind.
+#
+# Der Job gehoert in den BESTEHENDEN Pruef-Workflow des Projekts, damit `needs`
+# die Reihenfolge native garantiert. Wird ein Pruef-Job ergaenzt, MUSS er hier
+# in `needs` nachgetragen werden - sonst deployt dieser Job daran vorbei.
+#
+# Wichtig fuer den Pruef-Workflow: auf dem Deploy-Branch nicht abbrechen, sonst
+# schneidet ein zweiter Push den laufenden ansible-playbook mitten durch:
+#   concurrency:
+#     group: ${{ github.workflow }}-${{ github.ref }}
+#     cancel-in-progress: ${{ github.ref != 'refs/heads/develop' }}
+jobs:
+  deploy-stag:
+    needs: [checker, linter]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    uses: artack/artack_ansible-action/.github/workflows/deploy.yaml@<tag-oder-sha>
+    with:
+      environment: stag
+      playbook: deploy_stag.yaml
+      # Der exakte Commit, nicht der Branch-Name: der Branch kann zwischen
+      # Trigger und Ausfuehrung weiterwandern.
+      git-ref: ${{ github.sha }}
+    secrets: inherit

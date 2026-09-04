@@ -1,161 +1,69 @@
-name: artack Ansistrano Deploy
-description: Fuehrt ein artack-Ansistrano-Playbook nicht-interaktiv auf einem Zielserver aus (Mechanik-Schicht; fuer Deployments den Reusable Workflow bevorzugen).
+name: artack Ansible Playbook
+description: Fuehrt ein bestehendes Ansible-Playbook eines artack-Projekts in der CI aus. Fuer Deployments den Reusable Workflow bevorzugen - nur der kann environment und concurrency setzen.
 inputs:
   playbook:
-    description: Playbook relativ zum working-directory, z.B. deploy_prod.yaml oder rollback_prod.yaml.
+    description: Pfad zum Playbook im Repository, z.B. deploy_stag.yaml oder deployment/deploy_stag.yaml. Sein Verzeichnis ist das Arbeitsverzeichnis - dort liegen ansible.cfg und hosts.yaml.
     required: true
   git-ref:
-    description: Branch, Tag oder SHA, der deployt wird. Wird als "-e git_branch=<ref>" gesetzt und umgeht damit das vars_prompt. Fuer Rollback leer lassen.
+    description: Branch, Tag oder SHA, der deployt wird. Wird als "-e git_branch=<ref>" gesetzt und umgeht damit das vars_prompt der Playbooks. Fuer Playbooks ohne vars_prompt (Rollback) leer lassen.
     required: false
     default: ""
   ssh-private-key:
-    description: Privater Deploy-Schluessel (CI -> Zielserver). Immer aus einem Secret speisen, nie literal.
+    description: Privater Deploy-Schluessel. Immer aus einem Secret speisen, nie literal.
     required: true
   ssh-known-hosts:
     description: known_hosts-Eintrag des Zielservers (Ausgabe von ssh-keyscan). Pflicht - es wird kein StrictHostKeyChecking=no verwendet.
     required: true
-  working-directory:
-    description: Verzeichnis mit ansible.cfg, hosts.yaml und den Playbooks.
-    required: false
-    default: "."
-  galaxy-requirements:
-    description: Requirements-Datei fuer die Ansistrano-Rollen. Leer = Schritt ueberspringen (fuer Projekte ohne deployment/-Submodul).
-    required: false
-    default: "deployment/requirements.yml"
-  galaxy-requirements-inline:
-    description: Requirements-YAML als Text, mit festen Versionen. Hat Vorrang vor galaxy-requirements. Notwendig, weil deployment/requirements.yml keine Versionen pinnt und die Rollen untereinander nicht kompatibel sind.
-    required: false
-    default: ""
   ansible-version:
-    description: "pip-Spezifikation. Default ist die volle ansible-Distribution statt ansible-core - die Hooks des deployment/-Submoduls benutzen Module aus community.general (z.B. htpasswd), und ansible-core bringt keine Collections mit. ansible 9.13 entspricht core 2.16 und dem Stand der Entwicklermaschinen. Leer = vorinstalliertes nehmen."
+    description: "pip-Spezifikation. Default ist die volle ansible-Distribution statt ansible-core - die Playbooks und Hooks benutzen Module aus community.general (z.B. htpasswd), und ansible-core bringt keine Collections mit. Leer = vorinstalliertes nehmen."
     required: false
     default: "ansible~=9.13.0"
+  galaxy-requirements-inline:
+    description: Requirements-YAML als Text. Override fuer Ausnahmen; ohne Angabe gelten die eingebauten, bekannt-guten Versionen.
+    required: false
+    default: ""
+  galaxy-requirements:
+    description: Pfad zu einer Requirements-Datei. Nur setzen, wenn sie Versionen pinnt - eine ungepinnte Datei zieht die neuesten Rollen, und daran brechen artack-Playbooks.
+    required: false
+    default: ""
   extra-vars:
     description: Zusaetzliche Ansible-Variablen als key=value (eine Zeichenkette, wird als weiteres -e uebergeben).
-    required: false
-    default: ""
-  check-target:
-    description: Prueft vor dem Lauf, dass das Playbook auf genau eine Umgebung zeigt und dasselbe ansistrano_deploy_to hat wie das Deploy-Playbook derselben Umgebung. Nur mit gutem Grund abschalten.
-    required: false
-    default: "true"
-  reference-playbook:
-    description: Referenz fuer die Ziel-Pruefung. Leer = aus dem Namen abgeleitet (rollback_prod.yaml -> deploy_prod.yaml).
-    required: false
-    default: ""
-  assets-build-command:
-    description: Build-Befehl fuer Frontend-Assets, z.B. "yarn build:prod". Leer = Build und Upload komplett ueberspringen (Projekte ohne Encore).
-    required: false
-    default: ""
-  assets-source:
-    description: Verzeichnis mit den gebauten Assets, relativ zum working-directory.
-    required: false
-    default: "public/build"
-  assets-target:
-    description: Ziel als user@host:/pfad, z.B. www-btc-stag@suissetec01.nine.ch:~/public_html/shared/public/build. Pflicht, wenn assets-build-command gesetzt ist.
-    required: false
-    default: ""
-  node-version:
-    description: Node-Version fuer den Asset-Build.
-    required: false
-    default: "20"
-  clone-with-github-token:
-    description: Laesst den Zielserver per HTTPS mit dem kurzlebigen GITHUB_TOKEN des Laufs klonen statt per ssh://. Nur fuer Projekte, deren Repo auf github.com liegt.
-    required: false
-    default: "false"
-  github-token:
-    description: Token fuer den HTTPS-Klon. Im Reusable Workflow automatisch github.token; braucht contents read.
     required: false
     default: ""
 runs:
   using: composite
   steps:
-    - name: Install ansible-core
+    - name: Install ansible
       if: inputs.ansible-version != ''
       shell: bash
       env:
         ANSIBLE_VERSION: ${{ inputs.ansible-version }}
       run: |
-        # Eigene venv im Runner-Home statt pipx. Zwei Sackgassen davor, beide im
-        # Pilotlauf gemessen (2026-09-04):
-        #   pipx install <pin>          -> "already seems to be installed",
-        #                                  laesst die vorinstallierte Version
-        #                                  stehen; der Pin ist still unwirksam
-        #                                  (2.21.3 statt 2.16.14 gelaufen).
-        #   pipx install --force <pin>  -> "[Errno 1] Operation not permitted:
-        #                                  /opt/pipx/venvs/ansible-core/..." -
-        #                                  das Verzeichnis gehoert root.
-        # Eine venv unter $HOME umgeht beides und macht den Pin verbindlich.
+        # Eigene venv im Runner-Home statt pipx. Zwei Sackgassen davor, beide
+        # gemessen: `pipx install <pin>` meldet "already seems to be installed"
+        # und laesst die vorinstallierte Version stehen, der Pin ist dann still
+        # unwirksam; `pipx install --force` scheitert mit "Operation not
+        # permitted", weil /opt/pipx/venvs root gehoert.
         venv="${HOME}/.artack-ansible"
         python3 -m venv "${venv}"
         "${venv}/bin/pip" install --quiet --upgrade pip
         "${venv}/bin/pip" install --quiet "${ANSIBLE_VERSION}"
         # GITHUB_PATH greift erst im naechsten Schritt, darum hier absolut.
         "${venv}/bin/ansible" --version
-        "${venv}/bin/ansible-galaxy" collection list 2>/dev/null | head -20 || true
         echo "${venv}/bin" >> "${GITHUB_PATH}"
-
-    # Assets VOR dem Playbook: Der Symlink-Wechsel im Playbook schaltet den
-    # Code um, die Assets liegen in einem shared path. Begruendung der
-    # Reihenfolge in src/deploy-assets.sh.
-    # Bewusst OHNE `cache: yarn`: Dessen Cache-Lookup ruft `yarn --version` auf,
-    # und das yarn des Runner-Images ist ein Shim auf /usr/bin/yarn, gebunden an
-    # die Standard-Node-Installation. Nach dem Node-Wechsel zeigt es ins Leere
-    # und bringt den Lauf um, bevor ein eigener yarn-Befehl laeuft
-    # ("Cannot find module '/usr/bin/yarn'", Pilotlauf 3 am 2026-09-04).
-    # Caching waere mit actions/cache auf das yarn-Cache-Verzeichnis nachruestbar.
-    - name: Setup Node
-      if: inputs.assets-build-command != ''
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ inputs.node-version }}
-
-    - name: Build assets
-      if: inputs.assets-build-command != ''
-      shell: bash
-      working-directory: ${{ inputs.working-directory }}
-      run: |
-        # yarn passend zur gerade eingesetzten Node-Version bereitstellen.
-        corepack enable 2>/dev/null || true
-        if ! yarn --version > /dev/null 2>&1; then
-          npm install -g yarn@1
-        fi
-        yarn --version
-        yarn install --frozen-lockfile
-        ${{ inputs.assets-build-command }}
-
-    - name: Deploy assets
-      if: inputs.assets-build-command != ''
-      shell: bash
-      working-directory: ${{ inputs.working-directory }}
-      env:
-        ARTACK_SSH_PRIVATE_KEY: ${{ inputs.ssh-private-key }}
-        ARTACK_SSH_KNOWN_HOSTS: ${{ inputs.ssh-known-hosts }}
-      run: |
-        if [ -z "${{ inputs.assets-target }}" ]; then
-          echo "::error::assets-target fehlt, obwohl assets-build-command gesetzt ist."
-          exit 1
-        fi
-        "${GITHUB_ACTION_PATH}/src/deploy-assets.sh" \
-          "${{ inputs.assets-source }}" \
-          "${{ inputs.assets-target }}"
 
     - name: Run playbook
       shell: bash
-      working-directory: ${{ inputs.working-directory }}
       env:
-        # Die Geheimnisse gehen ueber die Umgebung, nicht ueber die Kommandozeile:
-        # eine Interpolation im run-Body wuerde sie in das Shell-Skript auf der
-        # Platte schreiben.
+        # Die Geheimnisse gehen ueber die Umgebung, nicht ueber die
+        # Kommandozeile: eine Interpolation im run-Body wuerde sie in das
+        # Shell-Skript auf der Platte schreiben.
         ARTACK_SSH_PRIVATE_KEY: ${{ inputs.ssh-private-key }}
         ARTACK_SSH_KNOWN_HOSTS: ${{ inputs.ssh-known-hosts }}
-        ARTACK_GITHUB_TOKEN: ${{ inputs.github-token }}
         ARTACK_GALAXY_REQUIREMENTS_INLINE: ${{ inputs.galaxy-requirements-inline }}
       run: |
         "${GITHUB_ACTION_PATH}/src/run-playbook.sh" \
           "${{ inputs.playbook }}" \
           "${{ inputs.git-ref }}" \
           "${{ inputs.galaxy-requirements }}" \
-          "${{ inputs.extra-vars }}" \
-          "${{ inputs.check-target == 'true' && '1' || '0' }}" \
-          "${{ inputs.reference-playbook }}" \
-          "${{ inputs.clone-with-github-token == 'true' && '1' || '0' }}"
+          "${{ inputs.extra-vars }}"

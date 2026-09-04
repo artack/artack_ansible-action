@@ -1,33 +1,83 @@
 #!/usr/bin/env bash
 #
-# Fuehrt ein artack-Ansistrano-Playbook nicht-interaktiv aus.
+# Fuehrt ein artack-Ansistrano-Playbook nicht-interaktiv aus - nichts weiter.
 #
-# Erwartet die beiden Geheimnisse ausschliesslich ueber die Umgebung, damit sie
-# nie in einer Kommandozeile oder in einer Datei im Workspace landen:
-#   ARTACK_SSH_PRIVATE_KEY   privater Deploy-Schluessel (CI -> Zielserver)
+# Der Anspruch: Jedes Projekt, auch ein unbekanntes, gibt den Pfad zu seinem
+# bestehenden Playbook an, und es laeuft wie von Hand. Darum wird hier nichts
+# umgeschrieben, nichts geprueft und nichts ueber das Playbook hinaus getan.
+#
+# Geheimnisse ausschliesslich ueber die Umgebung, damit sie nie in einer
+# Kommandozeile oder in einer Datei im Workspace landen:
+#   ARTACK_SSH_PRIVATE_KEY   privater Deploy-Schluessel
 #   ARTACK_SSH_KNOWN_HOSTS   known_hosts-Eintrag/e des Zielservers
+# Optional:
+#   ARTACK_GALAXY_REQUIREMENTS_INLINE  Requirements-YAML als Text (Override)
 #
-# Aufruf: run-playbook.sh <playbook> <git-ref|""> <galaxy-requirements|""> \
-#                          <extra-vars|""> <check-target 1|0> <referenz-playbook|"">
+# Aufruf: run-playbook.sh <playbook> <git-ref|""> <galaxy-requirements|""> <extra-vars|"">
 
 set -euo pipefail
 
-playbook="${1:?playbook fehlt}"
+playbook_arg="${1:?playbook fehlt}"
 git_ref="${2-}"
 galaxy_requirements="${3-}"
 extra_vars="${4-}"
-check_target="${5-1}"
-reference_playbook="${6-}"
-# 1 = Repo per HTTPS mit dem kurzlebigen GITHUB_TOKEN klonen statt per ssh://.
-clone_with_token="${7-0}"
 
 fail() { printf '::error::%s\n' "$*" >&2; exit 1; }
 
-[[ -f "${playbook}" ]] || fail "Playbook '${playbook}' nicht gefunden (working-directory falsch?)."
+# Bekannt-gute Rollen-Versionen, eingebaut als Default.
+#
+# Warum nicht die requirements.yml des Projekts: Die pinnt keine Versionen.
+# `ansible-galaxy install` aktualisiert eine bereits vorhandene Rolle nicht -
+# auf einer Entwicklermaschine liegt darum, was dort vor Jahren installiert
+# wurde, waehrend ein frischer Runner die neuesten holt. ansistrano.deploy 4.4.0
+# setzt `ansistrano_release_path` per set_fact als String, waehrend bis 4.3.0
+# ein registriertes Ergebnis mit `.stdout` daraus wurde - und `.stdout` war die
+# dokumentierte Schnittstelle. Alle artack-Playbooks und -Hooks greifen so
+# darauf zu und brechen mit 4.4.0.
+#
+# "Out of the box wie vorher" heisst deshalb: dieselben Versionen wie auf der
+# Entwicklermaschine. Das sind die aus dem gruenen Pilotlauf.
+#
+# DAS IST EINE FRIST, KEIN ZUSTAND. cbrunnkvist.ansistrano-symfony-deploy hat
+# seit 2024-09 keinen Commit und passt nicht mehr zur aktuellen Hauptrolle. Der
+# Ausweg ist, `.stdout`-Zugriffe auf
+# `ansistrano_release_path.stdout | default(ansistrano_release_path)`
+# umzustellen - dann laeuft beides. Bis dahin gilt dieses Pinning.
+#
+# Herkunft der einzelnen Pins, unterschiedlich belastbar:
+#   ansistrano.deploy 4.0.1  - im gruenen Lauf ausgefuehrt. Belegt.
+#   cbrunnkvist v1.4.1       - im gruenen Lauf ausgefuehrt, und ohnehin die
+#                              neueste Fassung. Belegt.
+#   ansistrano.rollback 3.1.0 - NICHT gemessen. Das ist die Fassung auf der
+#                              Entwicklermaschine (installiert 2022-05-16); ein
+#                              Rollback ist nie gelaufen. Es gibt auch keine
+#                              Kompatibilitaetsbedingung zu deploy 4.0.1: Die
+#                              Rollback-Rolle setzt ihre Variablen selbst und
+#                              nichts von aussen greift darauf zu - 3.1.0
+#                              (.stdout) und 4.0.1 (set_fact) sind beide in sich
+#                              stimmig. Der Pin steht hier nur, damit nicht
+#                              still "latest" gezogen wird, und folgt der
+#                              Entwicklermaschine.
+read -r -d '' DEFAULT_REQUIREMENTS <<'REQUIREMENTS' || true
+- src: ansistrano.deploy
+  version: 4.0.1
+- src: ansistrano.rollback
+  version: 3.1.0
+- src: cbrunnkvist.ansistrano-symfony-deploy
+  version: v1.4.1
+REQUIREMENTS
+
+[[ -f "${playbook_arg}" ]] || fail "Playbook '${playbook_arg}' nicht gefunden."
 [[ -n "${ARTACK_SSH_PRIVATE_KEY:-}" ]] || fail "ARTACK_SSH_PRIVATE_KEY ist leer - Secret nicht gesetzt oder nicht an die Umgebung durchgereicht."
 [[ -n "${ARTACK_SSH_KNOWN_HOSTS:-}" ]] || fail "ARTACK_SSH_KNOWN_HOSTS ist leer. Wir setzen bewusst kein StrictHostKeyChecking=no - ohne Host-Key kein Deployment."
 
-# Privates Arbeitsverzeichnis fuer known_hosts; der Schluessel selbst bleibt im Agent.
+# Das Verzeichnis des Playbooks ist das Arbeitsverzeichnis: Dort liegen
+# ansible.cfg und hosts.yaml, und ansible.cfg wird nur aus dem aktuellen
+# Verzeichnis gelesen. Ein Playbook im Wurzelverzeichnis ergibt ".".
+playbook_dir="$(dirname -- "${playbook_arg}")"
+playbook="$(basename -- "${playbook_arg}")"
+cd -- "${playbook_dir}"
+
 runtime_dir="$(mktemp -d)"
 chmod 700 "${runtime_dir}"
 agent_pid=""
@@ -49,104 +99,48 @@ printf '%s\n' "${ARTACK_SSH_PRIVATE_KEY}" | ssh-add - 2>/dev/null \
   || fail "Deploy-Schluessel konnte nicht geladen werden (Format? Passphrase? fehlender Zeilenumbruch am Ende?)."
 
 # Host-Key wird geprueft, nicht umgangen.
+#
+# ForwardAgent=yes, weil der ZIELSERVER selbst von GitHub klont
+# (ansistrano_deploy_via: git, ssh://git@github.com/...). Von Hand klappt das,
+# weil in der ~/.ssh/config ForwardAgent gesetzt ist und der Server den
+# weitergeleiteten Schluessel benutzt. Hier genauso: derselbe Deploy-Key
+# bedient Server-Login und Klon. Kein Token, keine ueberschriebene
+# Playbook-Variable, nichts das auf dem Server liegenbleibt.
+#
+# Setzt ein Projekt in hosts.yaml eigene ansible_ssh_common_args, gewinnt das
+# Inventar - dann muss ForwardAgent dort mit hinein.
 export ANSIBLE_HOST_KEY_CHECKING=True
-export ANSIBLE_SSH_COMMON_ARGS="-o UserKnownHostsFile=${known_hosts} -o StrictHostKeyChecking=yes"
+export ANSIBLE_SSH_COMMON_ARGS="-o UserKnownHostsFile=${known_hosts} -o StrictHostKeyChecking=yes -o ForwardAgent=yes"
 export ANSIBLE_FORCE_COLOR=1
 
 args=()
 # Der Branch wird explizit gesetzt, damit das vars_prompt der Playbooks nicht
-# stillschweigend auf seinen Default (git_default_branch) zurueckfaellt.
+# stillschweigend auf seinen Default (git_default_branch) zurueckfaellt: Bei
+# geschlossenem stdin fragt Ansible nicht, sondern nimmt den Default.
 [[ -n "${git_ref}" ]] && args+=(-e "git_branch=${git_ref}")
-
-# Der ZIELSERVER klont selbst von GitHub (ansistrano_deploy_via: git, das
-# git-Modul laeuft ohne delegate_to). Bei einem manuellen Deploy authentisiert er
-# sich mit dem weitergeleiteten Agenten des Menschen; in der CI gibt es den
-# nicht. Statt eines Deploy Keys nehmen wir das kurzlebige GITHUB_TOKEN des
-# Laufs: auf das aufrufende Repo begrenzt, read-only, und es verfaellt mit dem
-# Job. Nur fuer diesen Lauf per -e, das Playbook bleibt auf ssh:// - der manuelle
-# Weg ueber die Agent-Weiterleitung bleibt damit unberuehrt.
-original_repo=""
-if [[ "${clone_with_token}" == "1" ]]; then
-  [[ -n "${ARTACK_GITHUB_TOKEN:-}" ]] || fail "ARTACK_GITHUB_TOKEN ist leer - ohne Token kein HTTPS-Klon."
-  [[ -n "${GITHUB_REPOSITORY:-}" ]] || fail "GITHUB_REPOSITORY ist leer - laeuft das ausserhalb von GitHub Actions?"
-  original_repo="$(sed -n 's/^[[:space:]]*ansistrano_git_repo:[[:space:]]*//p' "${playbook}" | head -1 | tr -d '"'"'")"
-  args+=(-e "ansistrano_git_repo=https://x-access-token:${ARTACK_GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git")
-  echo "Klon per HTTPS mit dem Lauf-Token (github.com/${GITHUB_REPOSITORY})."
-fi
 [[ -n "${extra_vars}" ]] && args+=(-e "${extra_vars}")
 
-# ARTACK_GALAXY_REQUIREMENTS_INLINE hat Vorrang vor der Datei im Projekt.
-# Grund: deployment/requirements.yml pinnt keine Versionen. Entwicklermaschinen
-# haben deshalb, was dort vor Jahren installiert wurde, die CI holt jeweils die
-# neueste - und die Rollen sind untereinander nicht kompatibel. Gemessen am
-# 2026-09-04: ansistrano.deploy 4.0.1 registriert ansistrano_release_path aus
-# einem `command` (hat .stdout), 4.4.0 setzt es per `set_fact` als String;
-# cbrunnkvist v1.4.1 greift auf `.stdout` zu und bricht mit 4.4.0 ab.
+requirements="${runtime_dir}/requirements.yml"
 if [[ -n "${ARTACK_GALAXY_REQUIREMENTS_INLINE:-}" ]]; then
-  inline_requirements="${runtime_dir}/requirements.yml"
-  printf '%s\n' "${ARTACK_GALAXY_REQUIREMENTS_INLINE}" > "${inline_requirements}"
-  echo "::group::ansible-galaxy install (gepinnte Versionen)"
-  cat "${inline_requirements}"
-  ansible-galaxy install -r "${inline_requirements}"
-  echo "::endgroup::"
+  printf '%s\n' "${ARTACK_GALAXY_REQUIREMENTS_INLINE}" > "${requirements}"
+  echo "Galaxy-Rollen: Override des Aufrufers."
 elif [[ -n "${galaxy_requirements}" ]]; then
-  [[ -f "${galaxy_requirements}" ]] || fail "Galaxy-Requirements '${galaxy_requirements}' nicht gefunden. Bei Projekten ohne Submodul galaxy-requirements leeren und die Rollen anders bereitstellen."
-  echo "::group::ansible-galaxy install"
-  echo "::warning::deployment/requirements.yml pinnt keine Versionen - die CI holt die jeweils neuesten Rollen. Besser galaxy-requirements-inline mit festen Versionen setzen."
-  ansible-galaxy install -r "${galaxy_requirements}"
-  echo "::endgroup::"
+  [[ -f "${galaxy_requirements}" ]] || fail "Galaxy-Requirements '${galaxy_requirements}' nicht gefunden."
+  cp -- "${galaxy_requirements}" "${requirements}"
+  echo "::warning::'${galaxy_requirements}' pinnt vermutlich keine Versionen - dann holt der Runner die neuesten Rollen, und artack-Playbooks brechen an ansistrano.deploy 4.4.0."
+else
+  printf '%s\n' "${DEFAULT_REQUIREMENTS}" > "${requirements}"
+  echo "Galaxy-Rollen: eingebaute, bekannt-gute Versionen."
 fi
 
-# Ziel-Pruefung VOR dem Lauf: --syntax-check prueft Form, nicht Ziel. Diese
-# Pruefung faengt untailorierte dist-Vorlagen ("hosts: all",
-# ansistrano_deploy_to: /var/www/my-app), die sonst die falsche Umgebung treffen.
-if [[ "${check_target}" == "1" ]]; then
-  echo "::group::Ziel-Pruefung"
-  "$(dirname "${BASH_SOURCE[0]}")/check-playbook-target.sh" "${playbook}" "${reference_playbook}"
-  echo "::endgroup::"
-else
-  echo "::warning::Ziel-Pruefung uebersprungen (check-target: false). Das Playbook kann auf die falsche Umgebung zeigen."
-fi
+echo "::group::ansible-galaxy install"
+cat "${requirements}"
+ansible-galaxy install -r "${requirements}"
+echo "::endgroup::"
 
 echo "::group::ansible-playbook --syntax-check"
 ansible-playbook "${playbook}" "${args[@]}" --syntax-check < /dev/null
 echo "::endgroup::"
-
-# Aufraeumen: Das git-Modul schreibt die Remote-URL in
-# <deploy_to>/repo/.git/config auf dem Server, und dieses Verzeichnis ueberlebt
-# das Release. Der Token darin ist nach dem Job wertlos, soll aber trotzdem nicht
-# liegenbleiben - darum wird die URL auf den Wert aus dem Playbook
-# zurueckgesetzt. Laeuft auch, wenn das Playbook gescheitert ist.
-reset_remote_url() {
-  [[ -n "${original_repo}" ]] || return 0
-  local host deploy_to
-  host="$(ansible-playbook "${playbook}" "${args[@]}" --list-hosts < /dev/null 2>/dev/null \
-    | sed -n '/hosts ([0-9]*)/,$p' | tail -n +2 | tr -d ' ' | grep -v '^$' | head -1)"
-  deploy_to="$(sed -n 's/^[[:space:]]*ansistrano_deploy_to:[[:space:]]*//p' "${playbook}" | head -1 | tr -d '"'"'")"
-  [[ -n "${host}" && -n "${deploy_to}" ]] || { echo "::warning::Remote-URL konnte nicht zurueckgesetzt werden (Host oder Pfad unbekannt)."; return 0; }
-  echo "::group::Remote-URL zuruecksetzen"
-  # deploy_to bewusst UNGEQUOTET im Remote-Kommando: Es ist typischerweise
-  # "~/public_html", und in einfachen Anfuehrungszeichen expandiert die
-  # Remote-Shell die Tilde nicht. Genau daran ist der erste Entwurf still
-  # gescheitert - mit "2>/dev/null ... || true" sah das Ergebnis aus wie
-  # Erfolg ("CHANGED | rc=0"), waehrend der Token liegenblieb. Darum hier
-  # kein Fehler-Schlucken und eine Gegenprobe.
-  local url
-  if url="$(ansible "${host}" -m shell -a \
-        "git -C ${deploy_to}/repo remote set-url origin '${original_repo}' && git -C ${deploy_to}/repo remote get-url origin" \
-        < /dev/null 2>&1)"; then
-    if printf '%s' "${url}" | grep -q 'x-access-token'; then
-      echo "::error::Die Remote-URL auf dem Server enthaelt weiterhin einen Token."
-    else
-      echo "Remote-URL zurueckgesetzt auf ${original_repo}"
-    fi
-  else
-    printf '%s\n' "${url}"
-    echo "::error::Zuruecksetzen der Remote-URL fehlgeschlagen - im .git/config des Servers bleibt ein abgelaufener Token stehen."
-  fi
-  echo "::endgroup::"
-}
-trap 'reset_remote_url; cleanup' EXIT
 
 # stdin bewusst geschlossen: ein unerwarteter Prompt soll auffallen, nicht warten.
 ansible-playbook "${playbook}" "${args[@]}" < /dev/null

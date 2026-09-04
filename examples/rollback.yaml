@@ -1,14 +1,13 @@
 # Kommt so in ein Projekt: .github/workflows/rollback.yaml
 #
-# Erst einlegen, wenn die rollback_*.yaml des Projekts die Ziel-Pruefung
-# bestehen - siehe Einrichtungs-Checkliste im README.
+# Erst einlegen, wenn das rollback_*.yaml des Projekts geprueft und tailoriert
+# ist - mehrere Projekte tragen dort noch die dist-Vorlage mit `hosts: all`.
 name: rollback
 
 on:
   workflow_dispatch:
     inputs:
       environment:
-        description: Zielumgebung
         required: true
         type: choice
         options: [stag, prod]
@@ -19,15 +18,10 @@ on:
 
 jobs:
   rollback:
-    uses: artack/artack_ansible-action/.github/workflows/rollback.yaml@v0.3.1
+    uses: artack/artack_ansible-action/.github/workflows/rollback.yaml@<tag-oder-sha>
     with:
       # Eigenes Environment, damit Rollbacks eigene Freigeber haben koennen.
       environment: ${{ inputs.environment }}-rollback
       playbook: rollback_${{ inputs.environment }}.yaml
       confirm: ${{ inputs.confirm }}
-    # secrets: inherit ist Pflicht. Ein Reusable Workflow bekommt NUR, was der
-    # Aufrufer ihm uebergibt - es gibt keinen impliziten Zugriff auf dessen
-    # Secret-Speicher. `inherit` fuellt den Kontext, das environment im Baustein
-    # zieht dann die Environment-Secrets in den Scope. Ohne diese Zeile sind sie
-    # leer und der Lauf bricht ab (im Pilotlauf 1 am 2026-09-04 passiert).
     secrets: inherit

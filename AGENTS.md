@@ -1,43 +1,55 @@
 # artack_ansible-action - Hinweise fuer Agents
 
-Dieses Repository ist ein CI-Baustein fuer die Ansible-Belange unserer Projekte
-(Deployment und Rollback), kein Anwendungsprojekt. Remote:
+CI-Baustein, der ein **bestehendes** Ansible-Playbook ausfuehrt. Remote:
 `artack/artack_ansible-action`, oeffentlich, Default-Branch `main`.
 
-- `action.yml` ist die Mechanik-Schicht (Composite Action); die Einstiegspunkte
-  sind die Reusable Workflows unter `.github/workflows/` (`deploy`, `rollback`,
-  `preflight`). Aenderungen an der Mechanik gehoeren in `src/`, nicht in die
-  Workflow-YAML.
-- **Aufrufer referenzieren einen Versions-Tag, nie `@main`.** Ein Push auf
-  `main` darf nicht still das Deployment-Verhalten der Projekte im
-  Geltungsbereich aendern.
-  Schnittstellenbruch = neuer Major-Tag. Begruendung im README.
-- Die beiden Geheimnisse duerfen **nie** in einem `run:`-Body interpoliert
-  werden - das schriebe sie in ein Shell-Skript auf die Platte. Immer ueber
-  `env:` (siehe `action.yml`).
-- Kein `StrictHostKeyChecking=no` und kein stiller Rueckfall, wenn
-  `known_hosts` fehlt. Das ist eine Zusicherung, kein Detail; die Tests halten
-  sie fest.
-- `-e git_branch=<ref>` ist Pflicht bei Deployments: ohne die Extra-Variable
-  nimmt das `vars_prompt` der Projekt-Playbooks bei geschlossenem stdin
-  stillschweigend `git_default_branch`.
-- **Die Ziel-Pruefung (`src/check-playbook-target.sh`) laeuft vor jedem
-  Playbook-Lauf.** Sie darf nicht "wegoptimiert" werden: `--syntax-check` prueft
-  Form, nicht Ziel, und mehrere `rollback_*.yaml` unserer Projekte sind
-  untailorierte dist-Vorlagen mit `hosts: all`.
-- **Rollback-Playbooks der Projekte nie ausfuehren** und nie auf Vorrat
-  reparieren - siehe `~/development/CLAUDE.md`. Befund vorlegen, Sam reviewt.
-- **Geltungsbereich: die Liste im README** - sie ist abschliessend. Dort steht
-  auch, dass die Zugehoerigkeit von `suissetec_metaapp_legacy` noch offen ist.
-  Keine Gesamtzahl erfinden, solange das nicht entschieden ist, und keine
-  Projekte ergaenzen, die nicht in der Liste stehen.
+**Der Anspruch, an dem sich jede Aenderung messen muss:** Ein beliebiges
+Projekt - auch ein unbekanntes - gibt den Pfad zu seinem Playbook an, und es
+laeuft wie von Hand. Nichts wird umgeschrieben, nichts erzwungen, keine
+Namenskonvention verlangt.
+
+- **Nichts hinzufuegen, was ueber "ein Playbook ausfuehren" hinausgeht.** Der
+  Baustein hatte schon einmal eine Ziel-Pruefung mit Namenskonvention, einen
+  Asset-Build und einen Token-Klon, der eine Playbook-Variable ueberschrieb.
+  Alles drei ist bewusst entfernt worden, weil es projektspezifisch war und
+  "out of the box" verhindert hat. Nicht wieder einbauen.
 - **Aufrufer brauchen `secrets: inherit`.** Ein Reusable Workflow bekommt nur,
-  was der Aufrufer uebergibt - kein impliziter Zugriff auf dessen
-  Secret-Speicher. Das job-level `environment` regelt nur den Vorrang bei
-  Namensgleichheit, es fuellt den secrets-Kontext nicht. Diese Zeile nicht als
-  "unnoetig" entfernen; ohne sie sind die Secrets leer.
-- **`pipx install` braucht `--force`**, sonst bleibt die auf dem Runner
-  vorinstallierte ansible-core-Version stehen und der Pin ist still unwirksam.
+  was der Aufrufer uebergibt; das job-level `environment` regelt nur den Vorrang
+  bei Namensgleichheit und fuellt den secrets-Kontext nicht.
+- **Kein `StrictHostKeyChecking=no`** und kein stiller Rueckfall, wenn
+  `known_hosts` fehlt. Die Tests halten das fest.
+- **`-e git_branch=<ref>` ist Pflicht** bei Playbooks mit `vars_prompt`: Bei
+  geschlossenem stdin fragt Ansible nicht, sondern nimmt still
+  `git_default_branch`.
+- **`ForwardAgent=yes`** ist kein Detail: Der Zielserver klont selbst von
+  GitHub und hat keine eigene Zugangsberechtigung. Voraussetzung ist ein
+  read-only Deploy Key am Repo.
+- **`pipx` nicht wieder einfuehren** - siehe Kommentar in `action.yml`.
+
+## Kommandos auf einem Kundenserver
+
+Aus diesem Repo laeuft auf dem Zielserver **nur, was das Playbook selbst tut**.
+Kein `ssh`, kein `scp`, kein `ansible -m shell`, kein `mkdir`, kein `rm`, kein
+`chmod`. Die `chmod`/`rm`-Zeilen in `src/run-playbook.sh` betreffen
+ausschliesslich ein `mktemp -d` auf dem Runner.
+
+**Das bleibt so.** Wer das aendern will, hat vorher diese fuenf Fragen zu
+beantworten - sie stammen aus einem echten Fehler in diesem Repo
+(`cd '~/pfad'` mit gequoteter Tilde, dessen Fehlschlag durch
+`2>/dev/null || true` als `CHANGED | rc=0` erschien):
+
+1. Expandiert eine Tilde oder Variable, die in Anfuehrungszeichen steht?
+2. Wird ein Pfad aus Strings zusammengesetzt statt als Modul-Parameter
+   uebergeben?
+3. Werden Fehler geschluckt (`2>/dev/null`, `|| true`, `ignore_errors`)?
+4. Wird Erfolg am Rueckgabewert gemessen statt am Zustand? (`mkdir -p '~/x'`
+   liefert rc=0 und legt ein Verzeichnis namens `~` an.)
+5. Waere dasselbe Muster mit `rm`, `chown` oder `rsync --delete` gefaehrlich?
+
+Wenn rohes Shell unvermeidlich ist: Begruendung in den Code, warum kein
+Ansible-Modul es kann.
+
+- **Rollback-Playbooks der Projekte nie ausfuehren** - siehe
+  `~/development/CLAUDE.md`. Befund vorlegen, Sam reviewt.
 - Die Projekt-Playbooks werden von diesem Repo aus **nicht** geaendert.
-- Tests: `bats tests`. Sie laufen ohne Netz und ohne Server, weil die externen
-  Werkzeuge gestubbt sind. Neue Zusicherungen dort ergaenzen.
+- Tests: `bats tests`. Ohne Netz, ohne Server.

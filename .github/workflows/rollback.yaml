@@ -1,9 +1,14 @@
-# Reusable Workflow: Rollback auf das vorige Release.
+# Reusable Workflow: fuehrt ein Rollback-Playbook eines artack-Projekts aus.
 #
-# Absichtlich ein eigener Workflow und nicht ein Schalter am Deploy: so kann er
-# ein eigenes Environment mit eigenen Freigebern tragen und laesst sich nicht
-# versehentlich mitausloesen. Zusaetzlich muss der Aufrufer bestaetigen.
-name: artack ansistrano rollback
+# Eigener Workflow, nicht ein Schalter am Deploy: so kann er ein eigenes
+# Environment mit eigenen Freigebern tragen und laesst sich nicht versehentlich
+# mitausloesen. Zusaetzlich muss der Aufrufer bestaetigen.
+#
+# ACHTUNG: Die rollback_*.yaml mehrerer Projekte sind untailorierte
+# dist-Vorlagen (hosts: all trifft alle Umgebungen, ansistrano_deploy_to zeigt
+# auf einen Platzhalterpfad). Vor der ersten Nutzung pro Projekt pruefen und
+# Sam vorlegen - der Baustein prueft das NICHT, er fuehrt aus, was dasteht.
+name: artack ansible rollback
 
 on:
   workflow_call:
@@ -13,25 +18,25 @@ on:
         required: true
         type: string
       playbook:
-        description: Rollback-Playbook, z.B. rollback_prod.yaml.
+        description: Pfad zum Rollback-Playbook, z.B. rollback_prod.yaml.
         required: true
         type: string
       confirm:
         description: Muss wortwoertlich ROLLBACK sein. Schutz gegen einen Fehlklick im Dispatch-Formular.
         required: true
         type: string
-      working-directory:
-        required: false
-        type: string
-        default: "."
-      galaxy-requirements:
-        required: false
-        type: string
-        default: "deployment/requirements.yml"
       ansible-version:
         required: false
         type: string
         default: "ansible~=9.13.0"
+      galaxy-requirements-inline:
+        required: false
+        type: string
+        default: ""
+      galaxy-requirements:
+        required: false
+        type: string
+        default: ""
       runs-on:
         required: false
         type: string
@@ -40,11 +45,6 @@ on:
         required: false
         type: number
         default: 20
-      reference-playbook:
-        description: Deploy-Playbook derselben Umgebung als Referenz. Leer = aus dem Namen abgeleitet (rollback_prod.yaml -> deploy_prod.yaml).
-        required: false
-        type: string
-        default: ""
 
 jobs:
   rollback:
@@ -69,7 +69,7 @@ jobs:
             exit 1
           fi
 
-      # Rollback braucht nur die Playbooks und Hooks, nicht den deployten Ref -
+      # Rollback braucht die Playbooks und Hooks, nicht einen bestimmten Ref -
       # darum der Default-Branch.
       - name: Checkout project
         uses: actions/checkout@v6
@@ -91,15 +91,8 @@ jobs:
           playbook: ${{ inputs.playbook }}
           # Kein git-ref: die Rollback-Playbooks haben kein vars_prompt.
           git-ref: ""
-          working-directory: ${{ inputs.working-directory }}
-          galaxy-requirements: ${{ inputs.galaxy-requirements }}
           ansible-version: ${{ inputs.ansible-version }}
-          # Hier ist die Ziel-Pruefung der eigentliche Schutz - nicht abschaltbar.
-          check-target: true
-          reference-playbook: ${{ inputs.reference-playbook }}
-          # Direkt aus dem Environment dieses Jobs. NICHT vom Aufrufer
-          # durchreichen: Ein Job, der einen Reusable Workflow aufruft, darf
-          # laut GitHub kein `environment` setzen und sieht deshalb nur Repo-
-          # und Org-Secrets - Environment-Secrets waeren dort leer.
+          galaxy-requirements-inline: ${{ inputs.galaxy-requirements-inline }}
+          galaxy-requirements: ${{ inputs.galaxy-requirements }}
           ssh-private-key: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
           ssh-known-hosts: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}

@@ -1,25 +1,18 @@
 # artack_ansible-action
 
-Reusable Workflows und eine Composite Action, die die Ansistrano-Deployments
-unserer Symfony-Projekte in GitHub Actions ausfuehren: Deployment, Rollback und
-ein Preflight ohne Serverkontakt. Erwartet die Hauskonvention aus
-`artack-dev:deployment-setup` - `ansible.cfg`, `hosts.yaml` und
-`deploy_<env>.yaml` im Projektwurzelverzeichnis, Submodul
-[artack/ansistrano-php](https://github.com/artack/ansistrano-php) unter
-`deployment/`. Der Lauf installiert `ansible-core`, holt die Galaxy-Rollen aus
-`deployment/requirements.yml`, haelt den Deploy-Schluessel in einem ssh-agent und
-prueft den Host-Key gegen ein hinterlegtes `known_hosts`; den Git-Klon macht der
-Zielserver, deployt wird also ein gepushter Ref. Ist `assets-build-command` gesetzt, baut der Lauf zuerst die Frontend-Assets und
-liefert sie mit demselben Schluessel per `scp` aus - vor dem Symlink-Wechsel.
-Danach laeuft das Playbook als **Ziel-Pruefung** (genau eine Umgebung, gleiches
-`ansistrano_deploy_to` wie das Deploy-Playbook derselben Umgebung) ->
-**`--syntax-check`** -> **`ansible-playbook`**.
+Fuehrt ein **bestehendes** Ansible-Playbook eines artack-Projekts in GitHub
+Actions aus. Der Aufrufer gibt den Pfad zum Playbook an, sonst nichts; alles
+Projektspezifische steht im Playbook und wird nicht angefasst. Der Baustein
+installiert ansible, laedt den Deploy-Schluessel in einen eigenen ssh-agent,
+prueft den Host-Key gegen ein hinterlegtes `known_hosts` und ruft
+`ansible-playbook` auf. Das Verzeichnis des Playbooks ist das
+Arbeitsverzeichnis - dort liegen `ansible.cfg` und `hosts.yaml`. Reusable
+Workflows fuer Deploy, Rollback und einen Preflight ohne Serverkontakt.
 
 ## Aufrufer
 
-Manuell - `.github/workflows/deploy.yaml`:
-
 ```yaml
+# .github/workflows/deploy.yaml
 name: deploy
 on:
   workflow_dispatch:
@@ -29,7 +22,7 @@ on:
 
 jobs:
   deploy:
-    uses: artack/artack_ansible-action/.github/workflows/deploy.yaml@v0.3.1
+    uses: artack/artack_ansible-action/.github/workflows/deploy.yaml@<tag>
     with:
       environment: ${{ inputs.environment }}
       playbook: deploy_${{ inputs.environment }}.yaml
@@ -37,88 +30,46 @@ jobs:
     secrets: inherit
 ```
 
-`secrets: inherit` ist **Pflicht**. Ein Reusable Workflow bekommt nur, was der
-Aufrufer ihm uebergibt; `inherit` fuellt den Kontext, das `environment` im
-Baustein zieht dann die Environment-Secrets in den Scope. Ohne die Zeile sind
-sie leer und der Lauf bricht ab.
+`secrets: inherit` ist Pflicht - ein Reusable Workflow bekommt nur, was der
+Aufrufer uebergibt, und ein aufrufender Job darf kein `environment` setzen.
 
-Automatisch bei gruenen Checks: Job in den Pruef-Workflow legen, per `needs` an
-**alle** Pruef-Jobs haengen.
+Weitere Vorlagen in [`examples/`](examples/), darunter der automatische
+stag-Deploy per `needs` an allen Pruef-Jobs.
 
-```yaml
-  deploy-stag:
-    needs: [checker, linter]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
-    uses: artack/artack_ansible-action/.github/workflows/deploy.yaml@v0.3.1
-    with:
-      environment: stag
-      playbook: deploy_stag.yaml
-      git-ref: ${{ github.sha }}
-      # nur bei Projekten mit Frontend-Build:
-      assets-build-command: yarn build:prod
-      assets-target: www-btc-stag@suissetec01.nine.ch:~/public_html/shared/public/build
-    secrets: inherit
-```
-
-## Inputs (`deploy.yaml`)
+## Inputs
 
 | Name | Pflicht | Default | Bedeutung |
 | --- | --- | --- | --- |
 | `environment` | ja | - | GitHub Environment; traegt Secrets und Freigabe-Regeln |
-| `playbook` | ja | - | z.B. `deploy_prod.yaml` |
+| `playbook` | ja | - | Pfad im Repository, z.B. `deploy_stag.yaml` |
 | `git-ref` | ja | - | Branch, Tag oder SHA; wird als `-e git_branch=` gesetzt |
-| `working-directory` | nein | `.` | Verzeichnis mit `ansible.cfg` |
-| `galaxy-requirements` | nein | `deployment/requirements.yml` | leer = Galaxy-Schritt ueberspringen |
-| `ansible-version` | nein | `ansible~=9.13.0` | volle Distribution, nicht `ansible-core` - die Hooks brauchen `community.general` |
+| `ansible-version` | nein | `ansible~=9.13.0` | volle Distribution, nicht `ansible-core` - die Playbooks brauchen `community.general` |
+| `galaxy-requirements-inline` | nein | eingebaute Pins | Requirements-YAML als Text, Override |
+| `galaxy-requirements` | nein | `""` | Pfad zu einer Requirements-Datei; nur setzen, wenn sie Versionen pinnt |
 | `extra-vars` | nein | `""` | weitere Ansible-Variablen als `key=value` |
-| `check-target` | nein | `true` | Ziel-Pruefung |
-| `assets-build-command` | nein | `""` | z.B. `yarn build:prod`; leer = kein Asset-Build |
-| `assets-source` | nein | `public/build` | Verzeichnis mit den gebauten Assets |
-| `assets-target` | nein | `""` | `user@host:/pfad`; Pflicht, wenn `assets-build-command` gesetzt ist |
-| `node-version` | nein | `20` | fuer den Asset-Build |
-| `clone-with-github-token` | nein | `false` | Zielserver klont per HTTPS mit dem Lauf-Token statt per `ssh://` |
 | `runs-on` / `timeout-minutes` | nein | `ubuntu-latest` / `20` | |
 
-`rollback.yaml`: wie oben, aber ohne `git-ref`, mit `confirm` (muss `ROLLBACK`
-sein) und `reference-playbook`; `check-target` nicht abschaltbar.
-`preflight.yaml`: `working-directory`, `galaxy-requirements`, `ansible-version`,
-`runs-on`, `check-rollback`.
+`rollback.yaml`: wie oben, ohne `git-ref`, mit `confirm` (muss `ROLLBACK` sein).
+`preflight.yaml`: `playbook-glob`, `ansible-version`, `runs-on`.
 
 ## Secrets
 
 | Name | Inhalt | Wo |
 | --- | --- | --- |
-| `DEPLOY_SSH_PRIVATE_KEY` | privater Deploy-Schluessel, CI -> Zielserver | **Environment**, nicht Repo |
+| `DEPLOY_SSH_PRIVATE_KEY` | privater Deploy-Schluessel | **Environment**, nicht Repo |
 | `DEPLOY_SSH_KNOWN_HOSTS` | `ssh-keyscan`-Ausgabe, ohne `#`-Zeilen | **Environment**, nicht Repo |
 
 Je Umgebung ein eigener Schluessel: Namen gleich, Werte verschieden. Derselbe
-Schluessel in zwei Environments hebt das Scoping auf. Der Aufrufer braucht
-`secrets: inherit`, sonst erreichen sie den Baustein nicht.
-
-## Wie der Zielserver an das Repository kommt
-
-`ansistrano_deploy_via: git` heisst: **der Zielserver** klont, nicht der Runner.
-Bei einem manuellen Deploy authentisiert er sich mit dem weitergeleiteten
-SSH-Agenten des Menschen - in der CI gibt es den nicht.
-
-`clone-with-github-token: true` loest das mit dem `GITHUB_TOKEN` des Laufs, laut
-GitHub-Doku *"scoped to the invoking repository and expires after job
-completion"* und dort als bevorzugte Methode vor Deploy Keys und PATs genannt.
-Der Baustein setzt fuer den Lauf per `-e`
-
-```
-ansistrano_git_repo=https://x-access-token:<token>@github.com/<owner>/<repo>.git
-```
-
-und setzt die Remote-URL danach auf den Wert aus dem Playbook zurueck, damit im
-`.git/config` des Servers kein Token liegenbleibt. **Das Playbook bleibt auf
-`ssh://`** - manuelle Deployments ueber die Agent-Weiterleitung sind unberuehrt.
-
-Voraussetzung ist `contents: read`. Der aufrufende Job kann die Rechte nur
-einschraenken, nicht erweitern; der Baustein setzt selbst
-`permissions: contents: read`.
+Schluessel in zwei Environments hebt das Scoping auf.
 
 ## Einrichtung pro Umgebung
+
+Der Zielserver klont selbst (`ansistrano_deploy_via: git`,
+`ssh://git@github.com/...`). Der Baustein leitet den Deploy-Schluessel per
+`ForwardAgent=yes` weiter, so wie es eine `~/.ssh/config` mit `ForwardAgent`
+beim Deploy von Hand tut. **Darum muss die oeffentliche Haelfte des Schluessels
+am Repository als read-only Deploy Key haengen** - sonst kann der Server nicht
+klonen.
 
 ```bash
 REPO=artack/<projekt>
@@ -129,9 +80,10 @@ USER=<ansible_user aus hosts.yaml>
 # 1. Schluessel erzeugen (ohne Passphrase - ein Automat kann keine eingeben)
 ssh-keygen -t ed25519 -C "github-actions ${REPO##*/} $ENV" -f ./ci_$ENV -N ""
 
-# 2. Oeffentlichen Teil auf den Server, in authorized_keys des Deploy-Nutzers
+# 2. Oeffentlicher Teil: auf den Server UND als read-only Deploy Key ans Repo
 ssh-copy-id -i ./ci_$ENV.pub $USER@$HOST
 ssh -i ./ci_$ENV $USER@$HOST true   # muss ohne Rueckfrage durchlaufen
+gh repo deploy-key add ./ci_$ENV.pub --repo $REPO --title "github-actions $ENV"
 
 # 3. Host-Key holen und sichten
 ssh-keyscan "$HOST" | grep -v '^#' > known_hosts.txt
@@ -147,45 +99,49 @@ gh secret list --env $ENV --repo $REPO
 ```
 
 Fuer prod zusaetzlich Required reviewers und eine Deployment branch policy - der
-Baustein benutzt das Playbook **des deployten Refs**. Vor dem ersten Deployment
-`preflight.yaml` einlegen und gruen bekommen (Submodul-Pin, Syntax, Ziele, ohne
-Serverkontakt); bei untailorierten `rollback_*.yaml` mit
-`check-rollback: false` starten.
+Baustein benutzt das Playbook **des deployten Refs**.
 
-Reihenfolge bei der Einrichtung, jeweils eine Variable pro Lauf:
+Waehrend der Einrichtung den Baustein per **Commit-SHA** referenzieren, nicht
+per Tag; auf einen Tag umstellen, sobald das Projekt gruen deployt.
 
-1. Baustein per **Commit-SHA** referenzieren, nicht per Tag.
-2. **Ohne** `assets-build-command` deployen - beweist Secrets, SSH-Zugang und
-   Ansistrano.
-3. Danach den Asset-Build einschalten.
-4. Beides gruen: auf einen Tag umstellen.
+Setzt ein Projekt in `hosts.yaml` eigene `ansible_ssh_common_args`, gewinnt das
+Inventar - dann muss `ForwardAgent=yes` dort mit hinein.
+
+## Galaxy-Rollen: eingebaute Pins
+
+Der Baustein installiert feste Versionen von `ansistrano.deploy`,
+`ansistrano.rollback` und `cbrunnkvist.ansistrano-symfony-deploy`. Der Aufrufer
+setzt dafuer nichts.
+
+Grund: `deployment/requirements.yml` der Projekte pinnt keine Versionen, und
+`ansible-galaxy install` aktualisiert eine vorhandene Rolle nicht. Auf einer
+Entwicklermaschine liegt darum, was dort vor Jahren installiert wurde, ein
+frischer Runner holt die neuesten. `ansistrano.deploy` 4.4.0 setzt
+`ansistrano_release_path` als String, bis 4.3.0 war es ein registriertes
+Ergebnis mit `.stdout` - und `.stdout` war die dokumentierte Schnittstelle, auf
+die alle artack-Playbooks und -Hooks zugreifen. Mit 4.4.0 bricht jedes davon.
+
+**Das ist eine Frist, kein Zustand.** `cbrunnkvist.ansistrano-symfony-deploy`
+hat seit September 2024 keinen Commit. Der Ausweg ist, die `.stdout`-Zugriffe in
+`artack/ansistrano-php` und in den Projekt-Playbooks auf
+`ansistrano_release_path.stdout | default(ansistrano_release_path)`
+umzustellen - das laeuft in beiden Generationen. Bis dahin gilt das Pinning.
 
 ## Rollback
 
-Eigener Workflow, nur `workflow_dispatch`, eigenes Environment (z.B.
-`prod-rollback`) mit eigenen Freigebern, `confirm: ROLLBACK` erforderlich; teilt
-die `concurrency`-Gruppe mit dem Deploy derselben Umgebung. Die **Ziel-Pruefung
-ist hier nicht abschaltbar**: Sie loest die Hostliste per
-`ansible-playbook --list-hosts` auf und bricht ab, wenn das Playbook mehr als
-eine Umgebung trifft oder ein anderes `ansistrano_deploy_to` hat als das
-Deploy-Playbook - `--syntax-check` faengt das nicht.
+Eigener Workflow, nur `workflow_dispatch`, eigenes Environment mit eigenen
+Freigebern, `confirm: ROLLBACK` erforderlich; teilt die `concurrency`-Gruppe mit
+dem Deploy derselben Umgebung.
+
+**Der Baustein prueft das Playbook nicht** - er fuehrt aus, was dasteht. Mehrere
+Projekte tragen in `rollback_*.yaml` noch die dist-Vorlage mit `hosts: all` und
+einem Platzhalterpfad. Vor der ersten Nutzung pro Projekt pruefen.
 
 ## Versionierung
 
-**Im Betrieb** pinnen Aufrufer einen Tag, nie einen Branch - ein Push auf `main`
-wuerde sonst still das Deployment-Verhalten aller Aufrufer aendern.
-Schnittstellenbruch = neuer Major-Tag.
-
-**Waehrend der Einrichtung** pinnen sie einen **Commit-SHA**:
-
-```yaml
-uses: artack/artack_ansible-action/.github/workflows/deploy.yaml@8c143ebd1bc5431af71c646601699b9ae0ee6099
-```
-
-Ein SHA ist genauso unveraenderlich wie ein Tag, verbraucht aber keine
-Versionsnummer, solange noch iteriert wird. Umstellen auf den Tag, sobald das
-Projekt gruen deployt.
-
+Aufrufer pinnen einen Tag, nie einen Branch - ein Push auf `main` wuerde sonst
+still das Verhalten aller Aufrufer aendern. Schnittstellenbruch = neuer
+Major-Tag.
 
 ## Tests
 

@@ -1,4 +1,7 @@
 #!/usr/bin/env bats
+#
+# Die Zusicherungen des Kerns. Externe Werkzeuge sind gestubbt - kein Netz,
+# kein Server.
 
 setup() {
   SCRIPT="${BATS_TEST_DIRNAME}/../src/run-playbook.sh"
@@ -7,7 +10,6 @@ setup() {
   mkdir -p "${STUBS}"
   cd "${WORK}"
 
-  # Aufrufe der externen Werkzeuge werden protokolliert statt ausgefuehrt.
   cat > "${STUBS}/ssh-agent" <<'EOF'
 #!/usr/bin/env bash
 echo "SSH_AGENT_PID=$$; export SSH_AGENT_PID;"
@@ -19,18 +21,11 @@ EOF
   cat > "${STUBS}/ansible-playbook" <<'EOF'
 #!/usr/bin/env bash
 echo "ansible-playbook $*" >> "${WORK}/calls.log"
-# Die Ziel-Pruefung loest die Hosts ueber --list-hosts auf.
-if [[ "$*" == *--list-hosts* ]]; then
-  printf '  play #1 (x): x\n    pattern: [x]\n    hosts (1):\n      btc-prod\n'
-fi
 EOF
   cat > "${STUBS}/ansible-galaxy" <<'EOF'
 #!/usr/bin/env bash
 echo "ansible-galaxy $*" >> "${WORK}/calls.log"
-EOF
-  cat > "${STUBS}/ansible" <<'EOF'
-#!/usr/bin/env bash
-echo "ansible $*" >> "${WORK}/calls.log"
+cp "${3}" "${WORK}/requirements.used"
 EOF
   chmod +x "${STUBS}"/*
   export WORK
@@ -38,7 +33,7 @@ EOF
 
   export ARTACK_SSH_PRIVATE_KEY="fake-key"
   export ARTACK_SSH_KNOWN_HOSTS="example.test ssh-ed25519 AAAAfake"
-  printf '    ansistrano_deploy_to: "~/public_html"\n' > deploy_prod.yaml
+  : > deploy_prod.yaml
 }
 
 teardown() {
@@ -74,83 +69,75 @@ teardown() {
 @test "prueft die Syntax, bevor der Server angefasst wird" {
   run "${SCRIPT}" deploy_prod.yaml master "" ""
   [ "${status}" -eq 0 ]
-  # Der letzte Aufruf ist der echte Lauf, der unmittelbar davor die
-  # Syntaxpruefung. (Der erste Aufruf gehoert der Ziel-Pruefung mit
-  # --list-hosts, siehe eigener Test.)
-  tail -2 "${WORK}/calls.log" | head -1 | grep -q -- "--syntax-check"
+  grep "ansible-playbook" "${WORK}/calls.log" | head -1 | grep -q -- "--syntax-check"
   tail -1 "${WORK}/calls.log" | grep -qv -- "--syntax-check"
 }
 
-@test "setzt kein git_branch beim Rollback" {
-  printf '    ansistrano_deploy_to: "~/public_html"\n' > rollback_prod.yaml
-  run "${SCRIPT}" rollback_prod.yaml "" "" ""
+@test "setzt kein git_branch, wenn kein Ref uebergeben wird" {
+  run "${SCRIPT}" deploy_prod.yaml "" "" ""
   [ "${status}" -eq 0 ]
-  # Nur der echte Lauf zaehlt - die Ziel-Pruefung setzt git_branch selbst,
-  # damit das vars_prompt sie nicht blockiert.
-  ! tail -1 "${WORK}/calls.log" | grep -q -- "git_branch"
-}
-
-@test "ueberspringt Galaxy, wenn keine Requirements angegeben sind" {
-  run "${SCRIPT}" deploy_prod.yaml master "" ""
-  [ "${status}" -eq 0 ]
-  ! grep -q "ansible-galaxy" "${WORK}/calls.log"
-}
-
-@test "installiert die Rollen, wenn eine Requirements-Datei angegeben ist" {
-  mkdir -p deployment && touch deployment/requirements.yml
-  run "${SCRIPT}" deploy_prod.yaml master deployment/requirements.yml ""
-  [ "${status}" -eq 0 ]
-  grep -q "ansible-galaxy install -r deployment/requirements.yml" "${WORK}/calls.log"
-}
-
-@test "bricht ab, wenn die angegebene Requirements-Datei fehlt" {
-  run "${SCRIPT}" deploy_prod.yaml master deployment/requirements.yml ""
-  [ "${status}" -ne 0 ]
-  [[ "${output}" == *"nicht gefunden"* ]]
+  ! grep -q -- "git_branch" "${WORK}/calls.log"
 }
 
 @test "reicht extra-vars als weiteres -e durch" {
   run "${SCRIPT}" deploy_prod.yaml master "" "artack_run_opcache_clear=false"
   [ "${status}" -eq 0 ]
-  grep -q -- "-e artack_run_opcache_clear=false" "${WORK}/calls.log"
+  tail -1 "${WORK}/calls.log" | grep -q -- "-e artack_run_opcache_clear=false"
 }
 
-@test "prueft das Ziel, bevor der Server angefasst wird" {
-  run "${SCRIPT}" deploy_prod.yaml master "" "" 1 ""
+@test "installiert ohne Angabe die eingebauten, gepinnten Rollen-Versionen" {
+  run "${SCRIPT}" deploy_prod.yaml master "" ""
   [ "${status}" -eq 0 ]
-  grep -q -- "--list-hosts" "${WORK}/calls.log"
+  grep -q "version: 4.0.1" "${WORK}/requirements.used"
+  grep -q "cbrunnkvist.ansistrano-symfony-deploy" "${WORK}/requirements.used"
 }
 
-@test "check-target 0 ueberspringt die Ziel-Pruefung und warnt" {
-  run "${SCRIPT}" deploy_prod.yaml master "" "" 0 ""
+@test "der Inline-Override gewinnt gegen die eingebauten Versionen" {
+  export ARTACK_GALAXY_REQUIREMENTS_INLINE="- src: ansistrano.deploy
+  version: 9.9.9"
+  run "${SCRIPT}" deploy_prod.yaml master "" ""
   [ "${status}" -eq 0 ]
-  [[ "${output}" == *"Ziel-Pruefung uebersprungen"* ]]
-  ! grep -q -- "--list-hosts" "${WORK}/calls.log"
+  grep -q "version: 9.9.9" "${WORK}/requirements.used"
+  ! grep -q "version: 4.0.1" "${WORK}/requirements.used"
 }
 
-@test "klont per HTTPS mit dem Lauf-Token, wenn angefordert" {
-  ARTACK_GITHUB_TOKEN=ghs_test GITHUB_REPOSITORY=artack/x \
-    run "${SCRIPT}" deploy_prod.yaml master "" "" 1 "" 1
+@test "eine angegebene Requirements-Datei wird benutzt und gewarnt" {
+  printf -- "- src: ansistrano.deploy\n" > eigene.yml
+  run "${SCRIPT}" deploy_prod.yaml master eigene.yml ""
   [ "${status}" -eq 0 ]
-  grep -q -- "ansistrano_git_repo=https://x-access-token:ghs_test@github.com/artack/x.git" "${WORK}/calls.log"
+  [[ "${output}" == *"pinnt vermutlich keine Versionen"* ]]
 }
 
-@test "setzt die Remote-URL danach auf den Wert aus dem Playbook zurueck" {
-  printf '    ansistrano_deploy_to: "~/public_html"\n    ansistrano_git_repo: ssh://git@github.com/artack/x.git\n' > deploy_prod.yaml
-  ARTACK_GITHUB_TOKEN=ghs_test GITHUB_REPOSITORY=artack/x \
-    run "${SCRIPT}" deploy_prod.yaml master "" "" 1 "" 1
-  [ "${status}" -eq 0 ]
-  grep -q "git remote set-url origin 'ssh://git@github.com/artack/x.git'" "${WORK}/calls.log"
-}
-
-@test "bricht ab, wenn der HTTPS-Klon angefordert ist aber kein Token da ist" {
-  GITHUB_REPOSITORY=artack/x run "${SCRIPT}" deploy_prod.yaml master "" "" 1 "" 1
+@test "bricht ab, wenn die angegebene Requirements-Datei fehlt" {
+  run "${SCRIPT}" deploy_prod.yaml master fehlt.yml ""
   [ "${status}" -ne 0 ]
-  [[ "${output}" == *"ARTACK_GITHUB_TOKEN"* ]]
+  [[ "${output}" == *"nicht gefunden"* ]]
 }
 
-@test "ohne Token-Klon wird die Remote-URL nicht angetastet" {
-  run "${SCRIPT}" deploy_prod.yaml master "" "" 1 "" 0
+@test "leitet das Arbeitsverzeichnis aus dem Playbook-Pfad ab" {
+  mkdir -p unterordner
+  : > unterordner/deploy_stag.yaml
+  run "${SCRIPT}" unterordner/deploy_stag.yaml master "" ""
   [ "${status}" -eq 0 ]
-  ! grep -q "remote set-url" "${WORK}/calls.log"
+  # Aufgerufen wird der Basename, nicht der Pfad - das Verzeichnis ist gewechselt.
+  tail -1 "${WORK}/calls.log" | grep -q "ansible-playbook deploy_stag.yaml"
+  ! grep -q "unterordner/deploy_stag.yaml" "${WORK}/calls.log"
+}
+
+@test "leitet fuer ein Playbook im Wurzelverzeichnis auf . ab" {
+  run "${SCRIPT}" deploy_prod.yaml master "" ""
+  [ "${status}" -eq 0 ]
+  tail -1 "${WORK}/calls.log" | grep -q "ansible-playbook deploy_prod.yaml"
+}
+
+@test "leitet Agent-Forwarding an, damit der Server selbst klonen kann" {
+  cat > "${STUBS}/ansible-playbook" <<'EOF'
+#!/usr/bin/env bash
+echo "${ANSIBLE_SSH_COMMON_ARGS}" >> "${WORK}/env.log"
+EOF
+  chmod +x "${STUBS}/ansible-playbook"
+  run "${SCRIPT}" deploy_prod.yaml master "" ""
+  [ "${status}" -eq 0 ]
+  grep -q "ForwardAgent=yes" "${WORK}/env.log"
+  grep -q "StrictHostKeyChecking=yes" "${WORK}/env.log"
 }
